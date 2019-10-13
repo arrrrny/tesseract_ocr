@@ -9,3 +9,11 @@
 ## 0.1.2
 
 * added description
+
+## 0.1.2+1
+
+* fixed typo
+
+## 0.1.2+2
+
+* fixed description
