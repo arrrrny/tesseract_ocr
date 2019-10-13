@@ -1,0 +1,35 @@
+PODS:
+  - Flutter (1.0.0)
+  - path_provider (0.0.1):
+    - Flutter
+  - SwiftyTesseract (2.2.0)
+  - tesseract_ocr (0.0.1):
+    - Flutter
+    - SwiftyTesseract
+
+DEPENDENCIES:
+  - Flutter (from `.symlinks/flutter/ios`)
+  - path_provider (from `.symlinks/plugins/path_provider/ios`)
+  - tesseract_ocr (from `.symlinks/plugins/tesseract_ocr/ios`)
+
+SPEC REPOS:
+  trunk:
+    - SwiftyTesseract
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: ".symlinks/flutter/ios"
+  path_provider:
+    :path: ".symlinks/plugins/path_provider/ios"
+  tesseract_ocr:
+    :path: ".symlinks/plugins/tesseract_ocr/ios"
+
+SPEC CHECKSUMS:
+  Flutter: 0e3d915762c693b495b44d77113d4970485de6ec
+  path_provider: f96fff6166a8867510d2c25fdcc346327cc4b259
+  SwiftyTesseract: 44a8f4b2b7e5f22b997919f935261d22d28a4917
+  tesseract_ocr: 208c168e15471de1bf2cf2a85a16b9cfcc284216
+
+PODFILE CHECKSUM: 2ef0a40072d836b2e62fb7fcb125a5e514afe953
+
+COCOAPODS: 1.8.3
