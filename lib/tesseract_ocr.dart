@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as path;
+import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 
 class TesseractOcr {
@@ -22,7 +22,7 @@ class TesseractOcr {
 
   static Future<String> loadTessData() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final String tessdataDirectory = path.join(appDirectory.path, 'tessdata');
+    final String tessdataDirectory = join(appDirectory.path, 'tessdata');
     
     if (!await Directory(tessdataDirectory).exists()) {
       await Directory(tessdataDirectory).create();
