@@ -13,3 +13,5 @@ You can find additional language trained data files here <a href="https://github
     tessdata_config.json<br/>
 
 Plugin assumes you have tessdata folder in your assets directory and defined in your pubspec.yaml 
+
+Check the content of example/assets folder and example pubspec.yaml
