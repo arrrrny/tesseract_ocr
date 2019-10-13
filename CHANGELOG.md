@@ -5,3 +5,7 @@
 ## 0.1.1
 
 * fixed path references
+
+## 0.1.2
+
+* added description
