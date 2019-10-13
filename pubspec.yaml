@@ -1,8 +1,8 @@
 name: tesseract_ocr
 description: Tesseract OCR
 version: 0.1.0
-author:
-homepage:
+author: "Ahmet Tok"
+homepage: "https://github.com/arrrrny/tesseract_ocr"
 
 environment:
   sdk: ">=2.1.0 <3.0.0"
