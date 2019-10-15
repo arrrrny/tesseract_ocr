@@ -28,3 +28,7 @@
 ## 0.2.0
 
 * fixed dependecies
+
+## 0.2.1
+
+* removed flutter dependency
