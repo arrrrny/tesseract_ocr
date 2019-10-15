@@ -3,7 +3,7 @@ PODS:
   - path_provider (0.0.1):
     - Flutter
   - SwiftyTesseract (2.2.0)
-  - tesseract_ocr (0.0.1):
+  - tesseract_ocr (0.1.2):
     - Flutter
     - SwiftyTesseract
 
@@ -28,7 +28,7 @@ SPEC CHECKSUMS:
   Flutter: 0e3d915762c693b495b44d77113d4970485de6ec
   path_provider: f96fff6166a8867510d2c25fdcc346327cc4b259
   SwiftyTesseract: 44a8f4b2b7e5f22b997919f935261d22d28a4917
-  tesseract_ocr: 208c168e15471de1bf2cf2a85a16b9cfcc284216
+  tesseract_ocr: a29f6ac8ce0468a7c8e8198fe338b6e2dfd978bf
 
 PODFILE CHECKSUM: 2ef0a40072d836b2e62fb7fcb125a5e514afe953
 

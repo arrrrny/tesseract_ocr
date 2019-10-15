@@ -14,13 +14,13 @@ class TesseractOcr {
 
   static Future<String> extractText(String imagePath) async {
     assert(await File(imagePath).exists(), true);
-    final String tessData = await loadTessData();
+    final String tessData = await _loadTessData();
     final String extractText = await _channel.invokeMethod('extractText',
         <String, dynamic>{'imagePath': imagePath, 'tessData': tessData});
     return extractText;
   }
 
-  static Future<String> loadTessData() async {
+  static Future<String> _loadTessData() async {
     final Directory appDirectory = await getApplicationDocumentsDirectory();
     final String tessdataDirectory = join(appDirectory.path, 'tessdata');
     

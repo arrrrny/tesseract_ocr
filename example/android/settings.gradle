@@ -1,5 +1,4 @@
 include ':app', ':tesseract4android-release'
-
 def flutterProjectRoot = rootProject.projectDir.parentFile.toPath()
 
 def plugins = new Properties()

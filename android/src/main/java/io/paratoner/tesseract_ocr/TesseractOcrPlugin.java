@@ -1,6 +1,5 @@
 package io.paratoner.tesseract_ocr;
 
-
 import com.googlecode.tesseract.android.TessBaseAPI;
 
 import java.io.File;

@@ -21,3 +21,6 @@
 ## 0.1.2+3
 
 * added LICENSE
+## 0.1.3
+
+* updated swift version to 4.2
