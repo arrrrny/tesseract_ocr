@@ -31,4 +31,4 @@
 
 ## 0.2.1
 
-* removed flutter dependency
+* fixed swift version
