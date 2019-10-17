@@ -32,3 +32,12 @@
 ## 0.2.1
 
 * fixed swift version
+
+## 0.2.2
+
+* set target swift version to 4.2
+
+## 0.3.0
+
+* added language support you can pass the language as an optional parameter. TesseractOcr.extractText(imagePath, language: "financial");
+if not set it will default to "eng". language must match the name of .traineddata file

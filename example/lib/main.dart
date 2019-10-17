@@ -31,19 +31,19 @@ class _MyAppState extends State<MyApp> {
     String extractText;
     // Platform messages may fail, so we use a try/catch PlatformException.
     try {
-    final Directory directory = await getTemporaryDirectory();
-    final String imagePath = join(
-      directory.path,
-      "tmp_1.jpg",
-    );
-    final ByteData data = await rootBundle.load('packages/tesseract_ocr/images/test_16.jpg');
-    final Uint8List bytes = data.buffer.asUint8List(
-      data.offsetInBytes,
-      data.lengthInBytes,
-    );
-    await File(imagePath).writeAsBytes(bytes);
+      final Directory directory = await getTemporaryDirectory();
+      final String imagePath = join(
+        directory.path,
+        "tmp_1.jpg",
+      );
+      final ByteData data = await rootBundle.load('packages/tesseract_ocr/images/test.png');
+      final Uint8List bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      await File(imagePath).writeAsBytes(bytes);
 
-      extractText = await TesseractOcr.extractText(imagePath);
+      extractText = await TesseractOcr.extractText(imagePath, language: "financial");
     } on PlatformException {
       extractText = 'Failed to extract text';
     }
@@ -70,7 +70,7 @@ class _MyAppState extends State<MyApp> {
               Center(
                 child: Text('Detected Text: $_extractText\n'),
               ),
-              Image.asset('images/test_16.jpg',package: 'tesseract_ocr', height: 30.0),
+              Image.asset('images/test.png', package: 'tesseract_ocr', height: 30.0),
             ],
           )),
     );

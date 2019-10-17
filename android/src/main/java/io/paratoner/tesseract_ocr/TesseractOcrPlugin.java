@@ -12,8 +12,7 @@ import io.flutter.plugin.common.PluginRegistry.Registrar;
 /** TesseractOcrPlugin */
 public class TesseractOcrPlugin implements MethodCallHandler {
 
-  static final String DEFAULT_LANGUAGE = "eng";
-  private static final int DEFAULT_PAGE_SEG_MODE = TessBaseAPI.PageSegMode.PSM_SINGLE_LINE;
+  private static final int DEFAULT_PAGE_SEG_MODE = TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK;
 
   /** Plugin registration. */
   public static void registerWith(Registrar registrar) {
@@ -28,6 +27,10 @@ public class TesseractOcrPlugin implements MethodCallHandler {
     if (call.method.equals("extractText")) {
       final String tessDataPath = call.argument("tessData");
       final String imagePath = call.argument("imagePath");
+      String DEFAULT_LANGUAGE = "eng";
+      if(call.argument("language") != null){
+        DEFAULT_LANGUAGE = call.argument("language");
+      }
       final String[] recognizedText = new String[1];
       final TessBaseAPI baseApi = new TessBaseAPI();
       baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
@@ -44,7 +47,6 @@ public class TesseractOcrPlugin implements MethodCallHandler {
       t.start();
       try { t.join(); } catch (InterruptedException e) { e.printStackTrace(); }
       result.success(recognizedText[0]);
-
     } else {
       result.notImplemented();
     }
