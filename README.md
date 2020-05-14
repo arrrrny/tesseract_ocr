@@ -30,4 +30,4 @@ Using is very simple:
 
 `String text = await TesseractOcr.extractText('/path/to/image', language: 'eng');`
 
-You can leave `nlaguage` empty, it will default to `'eng'`.
+You can leave `language` empty, it will default to `'eng'`.
