@@ -11,6 +11,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _extractText = '';
+  int _scanTime = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -29,10 +30,19 @@ class _MyAppState extends State<MyApp> {
                     onPressed: () async {
                       var file =
                           await FilePicker.getFilePath(type: FileType.image);
+                      var watch = Stopwatch()..start();
                       _extractText = await TesseractOcr.extractText(file);
+                      _scanTime = watch.elapsedMilliseconds;
                       setState(() {});
                     },
                   ),
+                ),
+                SizedBox(
+                  height: 16,
+                ),
+                Text(
+                  'Scanning took $_scanTime ms',
+                  style: TextStyle(color: Colors.red),
                 ),
                 SizedBox(
                   height: 16,
