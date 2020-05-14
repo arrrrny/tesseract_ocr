@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 
 void main() => runApp(MyApp());
@@ -10,6 +11,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  bool _scanning = false;
   String _extractText = '';
   int _scanTime = 0;
 
@@ -24,18 +26,32 @@ class _MyAppState extends State<MyApp> {
             padding: EdgeInsets.all(16),
             child: ListView(
               children: <Widget>[
-                Center(
-                  child: RaisedButton(
-                    child: Text('Select image'),
-                    onPressed: () async {
-                      var file =
-                          await FilePicker.getFilePath(type: FileType.image);
-                      var watch = Stopwatch()..start();
-                      _extractText = await TesseractOcr.extractText(file);
-                      _scanTime = watch.elapsedMilliseconds;
-                      setState(() {});
-                    },
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    RaisedButton(
+                      child: Text('Select image'),
+                      onPressed: () async {
+                        var file =
+                            await FilePicker.getFilePath(type: FileType.image);
+                        _scanning = true;
+                        setState(() {});
+
+                        var watch = Stopwatch()..start();
+                        _extractText = await TesseractOcr.extractText(file);
+                        _scanTime = watch.elapsedMilliseconds;
+
+                        _scanning = false;
+                        setState(() {});
+                      },
+                    ),
+                    // It doesn't spin, because scanning hangs thread for now
+                    _scanning
+                        ? SpinKitCircle(
+                            color: Colors.black,
+                          )
+                        : Icon(Icons.done),
+                  ],
                 ),
                 SizedBox(
                   height: 16,
