@@ -12,10 +12,12 @@ class TesseractOcr {
   static const String TESS_DATA_PATH = 'assets/tessdata';
   static const MethodChannel _channel = const MethodChannel('tesseract_ocr');
 
-  static Future<String> extractText(String imagePath, {String language}) async {
+  static Future<String> extractText(String imagePath,
+      {String? language}) async {
     assert(await File(imagePath).exists(), true);
     final String tessData = await _loadTessData();
-    final String extractText = await _channel.invokeMethod('extractText', <String, dynamic>{
+    final String extractText =
+        await _channel.invokeMethod('extractText', <String, dynamic>{
       'imagePath': imagePath,
       'tessData': tessData,
       'language': language,
@@ -34,7 +36,8 @@ class TesseractOcr {
     return appDirectory.path;
   }
 
-  static Future _copyTessDataToAppDocumentsDirectory(String tessdataDirectory) async {
+  static Future _copyTessDataToAppDocumentsDirectory(
+      String tessdataDirectory) async {
     final String config = await rootBundle.loadString(TESS_DATA_CONFIG);
     Map<String, dynamic> files = jsonDecode(config);
     for (var file in files["files"]) {

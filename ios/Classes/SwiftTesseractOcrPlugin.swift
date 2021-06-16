@@ -20,18 +20,22 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             
             let params: [String : Any] = args as! [String : Any]
             let language: String? = params["language"] as? String
-            var swiftyTesseract = SwiftyTesseract(language: .english)
-            if(language != nil){
-                swiftyTesseract = SwiftyTesseract(language: .custom(language as String!))
-            }
             let  imagePath = params["imagePath"] as! String
+            let swiftyTesseract = initializeTesseract(language: language)
             guard let image = UIImage(contentsOfFile: imagePath)else { return }
-            
             swiftyTesseract.performOCR(on: image) { recognizedString in
-                
                 guard let extractText = recognizedString else { return }
                 result(extractText)
             }
+          
+        }
+    }
+    
+    func initializeTesseract(language: String?) -> SwiftyTesseract {
+        if(language != nil){
+            return SwiftyTesseract(language: .custom(language as String!))
+        } else {
+            return SwiftyTesseract(language: .english)
         }
     }
     
@@ -39,14 +43,12 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let destURL = documentsURL!.appendingPathComponent("tessdata")
-        
         let sourceURL = Bundle.main.bundleURL.appendingPathComponent("tessdata")
-        
         let fileManager = FileManager.default
         do {
             try fileManager.createSymbolicLink(at: sourceURL, withDestinationURL: destURL)
         } catch {
-            print(error)
+            print("initializeTessData: ", error)
         }
     }
 }
