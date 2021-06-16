@@ -24,24 +24,28 @@ public class TesseractOcrPlugin implements MethodCallHandler {
 
   @Override
   public void onMethodCall(MethodCall call, Result result) {
-    if (call.method.equals("extractText")) {
-      final String tessDataPath = call.argument("tessData");
-      final String imagePath = call.argument("imagePath");
-      String DEFAULT_LANGUAGE = "eng";
-      if (call.argument("language") != null) {
-        DEFAULT_LANGUAGE = call.argument("language");
-      }
-      final String[] recognizedText = new String[1];
-      final TessBaseAPI baseApi = new TessBaseAPI();
-      baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
-      final File tempFile = new File(imagePath);
-      baseApi.setPageSegMode(DEFAULT_PAGE_SEG_MODE);
 
-      Thread t = new Thread(new MyRunnable(baseApi, tempFile, recognizedText, result));
-      t.start();
+    switch (call.method) {
+      case "extractText":
+      case "extractHocr":
+        final String tessDataPath = call.argument("tessData");
+        final String imagePath = call.argument("imagePath");
+        String DEFAULT_LANGUAGE = "eng";
+        if (call.argument("language") != null) {
+          DEFAULT_LANGUAGE = call.argument("language");
+        }
+        final String[] recognizedText = new String[1];
+        final TessBaseAPI baseApi = new TessBaseAPI();
+        baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
+        final File tempFile = new File(imagePath);
+        baseApi.setPageSegMode(DEFAULT_PAGE_SEG_MODE);
 
-    } else {
-      result.notImplemented();
+        Thread t = new Thread(new MyRunnable(baseApi, tempFile, recognizedText, result, call.method.equals("extractHocr")));
+        t.start();
+        break;
+
+      default:
+        result.notImplemented();
     }
   }
 }
@@ -51,18 +55,24 @@ class MyRunnable implements Runnable {
   private File tempFile;
   private String[] recognizedText;
   private Result result;
+  private boolean isHocr;
 
-  public MyRunnable(TessBaseAPI baseApi, File tempFile, String[] recognizedText, Result result) {
+  public MyRunnable(TessBaseAPI baseApi, File tempFile, String[] recognizedText, Result result, boolean isHocr) {
     this.baseApi = baseApi;
     this.tempFile = tempFile;
     this.recognizedText = recognizedText;
     this.result = result;
+    this.isHocr = isHocr;
   }
 
   @Override
   public void run() {
     this.baseApi.setImage(this.tempFile);
-    recognizedText[0] = this.baseApi.getUTF8Text();
+    if (isHocr) {
+      recognizedText[0] = this.baseApi.getHOCRText(0);
+    } else {
+      recognizedText[0] = this.baseApi.getUTF8Text();
+    }
     this.baseApi.end();
     this.sendSuccess(recognizedText[0]);
   }

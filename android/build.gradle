@@ -8,7 +8,7 @@ buildscript {
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.2.1'
+        classpath 'com.android.tools.build:gradle:3.6.2'
     }
 }
 
@@ -31,8 +31,13 @@ android {
     lintOptions {
         disable 'InvalidPackage'
     }
+    packagingOptions{
+        doNotStrip '*/mips/*.so'
+        doNotStrip '*/mips64/*.so'
+    }
 }
 
 dependencies {
+    //compileOnly files('libs/tesseract4android-release.aar')
     implementation fileTree(include: '*.aar', dir: 'libs')
 }
