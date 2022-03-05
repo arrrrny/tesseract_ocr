@@ -29,20 +29,24 @@ class _MyAppState extends State<MyApp> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    RaisedButton(
+                    ElevatedButton(
                       child: Text('Select image'),
                       onPressed: () async {
-                        var file =
-                            await FilePicker.getFilePath(type: FileType.image);
-                        _scanning = true;
-                        setState(() {});
+                        FilePickerResult result = await FilePicker.platform
+                            .pickFiles(type: FileType.image);
+
+                        setState(() {
+                          _scanning = true;
+                        });
 
                         var watch = Stopwatch()..start();
-                        _extractText = await TesseractOcr.extractText(file);
+                        _extractText = await TesseractOcr.extractText(
+                            result.files.single.path);
                         _scanTime = watch.elapsedMilliseconds;
 
-                        _scanning = false;
-                        setState(() {});
+                        setState(() {
+                          _scanning = false;
+                        });
                       },
                     ),
                     // It doesn't spin, because scanning hangs thread for now
@@ -53,16 +57,12 @@ class _MyAppState extends State<MyApp> {
                         : Icon(Icons.done),
                   ],
                 ),
-                SizedBox(
-                  height: 16,
-                ),
+                SizedBox(height: 16),
                 Text(
                   'Scanning took $_scanTime ms',
                   style: TextStyle(color: Colors.red),
                 ),
-                SizedBox(
-                  height: 16,
-                ),
+                SizedBox(height: 16),
                 Center(child: SelectableText(_extractText)),
               ],
             ),
