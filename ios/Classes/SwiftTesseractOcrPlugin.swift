@@ -36,15 +36,14 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     }
     
     func initializeTessData() {
-        
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let destURL = documentsURL!.appendingPathComponent("tessdata")
-        
         let sourceURL = Bundle.main.bundleURL.appendingPathComponent("tessdata")
         
         let fileManager = FileManager.default
         do {
             try fileManager.createSymbolicLink(at: sourceURL, withDestinationURL: destURL)
+
         } catch {
             print(error)
         }

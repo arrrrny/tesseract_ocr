@@ -38,8 +38,10 @@ public class MainMethodCallHandler implements MethodCallHandler {
       if (call.argument("language") != null) {
         DEFAULT_LANGUAGE = call.argument("language");
       }
+
       final String[] recognizedText = new String[1];
       final TessBaseAPI baseApi = new TessBaseAPI();
+ 
       baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
       final File tempFile = new File(imagePath);
       baseApi.setPageSegMode(DEFAULT_PAGE_SEG_MODE);
