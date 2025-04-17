@@ -29,7 +29,7 @@ class _MyAppState extends State<MyApp> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    RaisedButton(
+                    TextButton(
                       child: Text('Select image'),
                       onPressed: () async {
                         var file =
