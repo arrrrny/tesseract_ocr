@@ -1,0 +1,9 @@
+.idea/
+android/.idea/
+*.iml
+.DS_Store
+build/
+.gradle/
+local.properties
+ios/.symlinks/
+ios/Pods/
