@@ -24,8 +24,9 @@ class TesseractOcr {
 
     // If using Tesseract engine, ensure tessData is loaded
     String? tessDataPath;
-    if (actualConfig.engine != OCREngine.vision) { // Check if NOT Vision
-       tessDataPath = await _loadTessData();
+    if (actualConfig.engine != OCREngine.vision) {
+      // Check if NOT Vision
+      tessDataPath = await _loadTessData();
     }
 
     // Build the arguments map
@@ -35,7 +36,8 @@ class TesseractOcr {
       'config': actualConfig.toMap(), // Pass the config as a map
     };
 
-    final String extractedText = await _channel.invokeMethod('extractText', args);
+    final String extractedText =
+        await _channel.invokeMethod('extractText', args);
 
     return extractedText;
   }
