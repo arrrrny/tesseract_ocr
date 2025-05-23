@@ -59,6 +59,8 @@ For the Tesseract engine to work, you need to include language trained data file
 
 The plugin will automatically copy these trained data files to the application's documents directory on the first run if they are not already present.
 
+**Note on Asset Loading Issues:** On some platforms (including certain M1 configurations), you might encounter asset loading errors related to path duplication (e.g., `assets/tessdata/assets/tessdata/...`). The plugin has been updated to mitigate this by adjusting the internal asset path constant. Ensure your `pubspec.yaml` and directory structure correctly follow the standard Flutter asset conventions as described above (`assets/tessdata/`).
+
 ## iOS Specific Setup (SwiftyTesseract 4.0.1 via Custom CocoaPods)
 
 SwiftyTesseract 4.0.x uses Swift Package Manager and removed CocoaPods support. To allow this plugin to use SwiftyTesseract 4.0.1 via CocoaPods, a custom setup is provided.

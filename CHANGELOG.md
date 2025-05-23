@@ -1,3 +1,7 @@
+## 0.4.1
+
+*   Fixed potential asset loading path duplication on certain platforms (e.g., M1) by adjusting the internal asset path constant.
+
 ## 0.4.0
 
 *   **Added Support for Multiple OCR Engines:** Introduced `OCRConfig` to allow selecting between Apple Vision (iOS) and Tesseract engines.
