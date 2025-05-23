@@ -2,17 +2,26 @@ PODS:
   - Flutter (1.0.0)
   - image_picker_ios (0.0.1):
     - Flutter
+  - libtesseract (0.0.2)
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
-  - tesseract_ocr (0.3.0):
+  - SwiftyTesseract401 (4.0.1):
+    - libtesseract
+  - tesseract_ocr (0.4.0):
     - Flutter
+    - SwiftyTesseract401
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
+  - SwiftyTesseract401 (from `../../ios`)
   - tesseract_ocr (from `.symlinks/plugins/tesseract_ocr/ios`)
+
+SPEC REPOS:
+  trunk:
+    - libtesseract
 
 EXTERNAL SOURCES:
   Flutter:
@@ -21,15 +30,19 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/image_picker_ios/ios"
   path_provider_foundation:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
+  SwiftyTesseract401:
+    :path: "../../ios"
   tesseract_ocr:
     :path: ".symlinks/plugins/tesseract_ocr/ios"
 
 SPEC CHECKSUMS:
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
+  libtesseract: e0aa4638fd81c3468e8124e13f6f59eaaf40a0f4
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
-  tesseract_ocr: ede8829e89e1c15269e166ecda9e63f599ae504a
+  SwiftyTesseract401: 7e763b177b992b23a3499071f79b8595616ef792
+  tesseract_ocr: 76b0c43e1936072cc94d633503cf820e1aa21ce2
 
-PODFILE CHECKSUM: dcd4ce0e019c0ff921edad49196636e78eb2e688
+PODFILE CHECKSUM: 494d9aeb90fee2c029f52013f41905efacef33c0
 
 COCOAPODS: 1.16.2

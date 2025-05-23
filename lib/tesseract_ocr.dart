@@ -6,23 +6,38 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart'; // Import OCRConfig
 
 class TesseractOcr {
   static const String TESS_DATA_CONFIG = 'assets/tessdata_config.json';
   static const String TESS_DATA_PATH = 'assets/tessdata';
   static const MethodChannel _channel = const MethodChannel('tesseract_ocr');
 
-  static Future<String> extractText(String imagePath,
-      {String? language}) async {
+  static Future<String> extractText(
+    String imagePath, {
+    OCRConfig? config, // Add optional OCRConfig parameter
+  }) async {
     assert(await File(imagePath).exists(), true);
-    final String tessData = await _loadTessData();
-    final String extractText =
-        await _channel.invokeMethod('extractText', <String, dynamic>{
+
+    // Use config if provided, otherwise create a default config
+    final actualConfig = config ?? const OCRConfig();
+
+    // If using Tesseract engine, ensure tessData is loaded
+    String? tessDataPath;
+    if (actualConfig.engine != OCREngine.vision) { // Check if NOT Vision
+       tessDataPath = await _loadTessData();
+    }
+
+    // Build the arguments map
+    final Map<String, dynamic> args = {
       'imagePath': imagePath,
-      'tessData': tessData,
-      'language': language,
-    });
-    return extractText;
+      'tessDataPath': tessDataPath, // Pass the loaded path
+      'config': actualConfig.toMap(), // Pass the config as a map
+    };
+
+    final String extractedText = await _channel.invokeMethod('extractText', args);
+
+    return extractedText;
   }
 
   static Future<String> _loadTessData() async {

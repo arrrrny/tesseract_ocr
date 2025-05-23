@@ -1,3 +1,10 @@
+## 0.4.0
+
+*   **Added Support for Multiple OCR Engines:** Introduced `OCRConfig` to allow selecting between Apple Vision (iOS) and Tesseract engines.
+*   **Added Support for SwiftyTesseract 4.0.1 (iOS via CocoaPods):** Implemented a custom CocoaPods setup with local podspecs (`SwiftyTesseract401.podspec` and `libtesseract.podspec`) to enable using SwiftyTesseract 4.0.1, which is otherwise Swift Package Manager only. Users must manually include `libtesseract.xcframework` in their iOS project. See `CUSTOM_PODS_README.md` for details.
+*   Updated example app to demonstrate engine selection.
+*   Added support for the latest Dart SDK.
+
 ## 0.1.0
 
 * Extract Text from images, Especially helpful when you are extracting single character images.
