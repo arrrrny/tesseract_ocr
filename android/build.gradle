@@ -3,26 +3,31 @@ version '1.0'
 
 buildscript {
     repositories {
+        mavenLocal()
         google()
         jcenter()
+        maven { url 'https://jitpack.io' }
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.6.2'
+        classpath 'com.android.tools.build:gradle:8.2.1'
     }
 }
 
 rootProject.allprojects {
     repositories {
+        mavenLocal()
         google()
         jcenter()
+        maven { url 'https://jitpack.io' }
     }
 }
 
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 28
+    namespace 'io.paratoner.tesseract_ocr'
+    compileSdkVersion 35
 
     defaultConfig {
         minSdkVersion 16
@@ -38,6 +43,12 @@ android {
 }
 
 dependencies {
-    //compileOnly files('libs/tesseract4android-release.aar')
-    implementation fileTree(include: '*.aar', dir: 'libs')
+    implementation 'cz.adaptech.tesseract4android:tesseract4android:4.8.0'
+    implementation 'androidx.lifecycle:lifecycle-process:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-common:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-livedata-core:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-livedata:2.6.2'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.6.2'
 }

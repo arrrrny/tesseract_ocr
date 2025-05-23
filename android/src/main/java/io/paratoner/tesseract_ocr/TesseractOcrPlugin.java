@@ -1,27 +1,35 @@
 package io.paratoner.tesseract_ocr;
 
 import com.googlecode.tesseract.android.TessBaseAPI;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.io.File;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry.Registrar;
-import android.os.Handler;
-import android.os.Looper;
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
+// Remove: import io.flutter.plugin.common.PluginRegistry.Registrar;
 
-/** TesseractOcrPlugin */
-public class TesseractOcrPlugin implements MethodCallHandler {
+public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
+  private MethodChannel channel;
 
-  private static final int DEFAULT_PAGE_SEG_MODE = TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK;
-
-  /** Plugin registration. */
-  public static void registerWith(Registrar registrar) {
-    final MethodChannel channel = new MethodChannel(registrar.messenger(), "tesseract_ocr");
-    channel.setMethodCallHandler(new TesseractOcrPlugin());
+  @Override
+  public void onAttachedToEngine(FlutterPluginBinding flutterPluginBinding) {
+    channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "tesseract_ocr");
+    channel.setMethodCallHandler(this);
   }
 
+  @Override
+  public void onDetachedFromEngine(FlutterPluginBinding binding) {
+    if (channel != null) {
+      channel.setMethodCallHandler(null);
+      channel = null;
+    }
+  }
+
+  // Remove the registerWith method
   @Override
   public void onMethodCall(MethodCall call, Result result) {
 
@@ -38,7 +46,7 @@ public class TesseractOcrPlugin implements MethodCallHandler {
         final TessBaseAPI baseApi = new TessBaseAPI();
         baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
         final File tempFile = new File(imagePath);
-        baseApi.setPageSegMode(DEFAULT_PAGE_SEG_MODE);
+        baseApi.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
 
         Thread t = new Thread(new MyRunnable(baseApi, tempFile, recognizedText, result, call.method.equals("extractHocr")));
         t.start();
@@ -73,7 +81,7 @@ class MyRunnable implements Runnable {
     } else {
       recognizedText[0] = this.baseApi.getUTF8Text();
     }
-    this.baseApi.end();
+    this.baseApi.recycle();
     this.sendSuccess(recognizedText[0]);
   }
 
