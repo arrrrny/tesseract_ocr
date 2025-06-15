@@ -11,7 +11,7 @@ import 'package:tesseract_ocr/ocr_engine_config.dart'; // Import OCRConfig
 class TesseractOcr {
   static const String TESS_DATA_CONFIG = 'assets/tessdata_config.json';
   // Adjusted path to potentially fix asset loading duplication on some platforms
-  static const String TESS_DATA_PATH = 'tessdata';
+  static const String TESS_DATA_PATH = 'assets/tessdata';
   static const MethodChannel _channel = const MethodChannel('tesseract_ocr');
 
   static Future<String> extractText(
