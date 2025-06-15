@@ -1,3 +1,11 @@
+## 0.5.0
+
+*   **BREAKING CHANGE FIX:** Fixed parameter compatibility between Dart and Android plugin that was causing "Data path must not be null!" errors
+*   Improved error handling in Android plugin with clearer error messages
+*   Enhanced compatibility for both direct language parameter and config-based language specification
+*   Updated documentation with comprehensive troubleshooting guide
+*   Removed debug print statements for cleaner logs
+
 ## 0.4.1
 
 *   Fixed potential asset loading path duplication on certain platforms (e.g., M1) by adjusting the internal asset path constant.

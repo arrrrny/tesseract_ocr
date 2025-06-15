@@ -59,7 +59,68 @@ For the Tesseract engine to work, you need to include language trained data file
 
 The plugin will automatically copy these trained data files to the application's documents directory on the first run if they are not already present.
 
-**Note on Asset Loading Issues:** On some platforms (including certain M1 configurations), you might encounter asset loading errors related to path duplication (e.g., `assets/tessdata/assets/tessdata/...`). The plugin has been updated to mitigate this by adjusting the internal asset path constant. Ensure your `pubspec.yaml` and directory structure correctly follow the standard Flutter asset conventions as described above (`assets/tessdata/`).
+**Note on Asset Loading Issues:** If you encounter asset loading errors or "Data path must not be null!" errors, ensure your setup follows these exact requirements:
+
+1. **Directory Structure:**
+   ```
+   your_project/
+   ├── assets/
+   │   ├── tessdata/
+   │   │   ├── eng.traineddata
+   │   │   └── [other language files]
+   │   └── tessdata_config.json
+   └── pubspec.yaml
+   ```
+
+2. **pubspec.yaml assets section:**
+   ```yaml
+   flutter:
+     assets:
+       - assets/
+       - assets/tessdata/
+   ```
+
+3. **tessdata_config.json content:**
+   ```json
+   {
+     "files": [
+       "eng.traineddata"
+     ]
+   }
+   ```
+
+**Troubleshooting:**
+- Ensure `.traineddata` files are in `assets/tessdata/` directory
+- Verify all language files listed in `tessdata_config.json` actually exist
+- Try adding individual file entries in pubspec.yaml if assets fail to load:
+  ```yaml
+  assets:
+    - assets/tessdata_config.json
+    - assets/tessdata/eng.traineddata
+  ```
+
+## Common Issues and Solutions
+
+### "Data path must not be null!" Error
+This error typically occurs when:
+- The tessdata files are not properly loaded from assets
+- The `tessdata_config.json` file is missing or incorrectly formatted
+- Asset paths in `pubspec.yaml` are not correctly configured
+
+**Solution:** Follow the exact directory structure and configuration shown above.
+
+### "Unable to load asset" Error
+This happens when Flutter cannot find the specified asset files.
+
+**Solution:**
+1. Verify file names match exactly between `tessdata_config.json` and actual files
+2. Ensure proper asset declarations in `pubspec.yaml`
+3. Try running `flutter clean` and `flutter pub get`
+
+### Path Duplication Issues (M1 Macs)
+Some users on M1 Macs may see paths like `assets/tessdata/assets/tessdata/file.traineddata`.
+
+**Solution:** The plugin automatically handles this, but ensure you're using the latest version.
 
 ## iOS Specific Setup (SwiftyTesseract 4.0.1 via Custom CocoaPods)
 
