@@ -11,7 +11,7 @@ import 'package:tesseract_ocr/ocr_engine_config.dart'; // Import OCRConfig
 class TesseractOcr {
   static const String TESS_DATA_CONFIG = 'assets/tessdata_config.json';
   // Adjusted path to potentially fix asset loading duplication on some platforms
-  static const String TESS_DATA_PATH = 'tessdata';
+  static const String TESS_DATA_PATH = 'assets/tessdata';
   static const MethodChannel _channel = const MethodChannel('tesseract_ocr');
 
   static Future<String> extractText(
@@ -33,12 +33,14 @@ class TesseractOcr {
     // Build the arguments map
     final Map<String, dynamic> args = {
       'imagePath': imagePath,
-      'tessDataPath': tessDataPath, // Pass the loaded path
-      'config': actualConfig.toMap(), // Pass the config as a map
+      'tessData': tessDataPath,
+      'language': actualConfig.language,
     };
 
-    final String extractedText =
-        await _channel.invokeMethod('extractText', args);
+    final String extractedText = await _channel.invokeMethod(
+      'extractText',
+      args,
+    );
 
     return extractedText;
   }
@@ -55,19 +57,24 @@ class TesseractOcr {
   }
 
   static Future _copyTessDataToAppDocumentsDirectory(
-      String tessdataDirectory) async {
+    String tessdataDirectory,
+  ) async {
     final String config = await rootBundle.loadString(TESS_DATA_CONFIG);
     Map<String, dynamic> files = jsonDecode(config);
     for (var file in files["files"]) {
-      final assetPath = join(TESS_DATA_PATH, file); // Modify path construction
-      print('DEBUG: Attempting to load asset from bundle: $assetPath'); // Add debug print
-      if (!await File(join(tessdataDirectory, file)).exists()) { // Also use join for destination path existence check
-        final ByteData data = await rootBundle.load(assetPath); // Use the variable
+      final assetPath = join(TESS_DATA_PATH, file);
+      if (!await File(join(tessdataDirectory, file)).exists()) {
+        // Also use join for destination path existence check
+        final ByteData data = await rootBundle.load(
+          assetPath,
+        ); // Use the variable
         final Uint8List bytes = data.buffer.asUint8List(
           data.offsetInBytes,
           data.lengthInBytes,
         );
-        await File(join(tessdataDirectory, file)).writeAsBytes(bytes); // Use join for destination path writing
+        await File(
+          join(tessdataDirectory, file),
+        ).writeAsBytes(bytes); // Use join for destination path writing
       }
     }
   }

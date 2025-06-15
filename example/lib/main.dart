@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'package:tesseract_ocr/ocr_engine_config.dart'; // Import the config file
 
@@ -18,7 +17,8 @@ class _MyAppState extends State<MyApp> {
   int _scanTime = 0;
   XFile? _selectedImage;
   bool _debugMode = true;
-  OCREngine _selectedEngine = OCREngine.defaultEngine; // Added state for engine selection
+  OCREngine _selectedEngine =
+      OCREngine.defaultEngine; // Added state for engine selection
 
   @override
   void initState() {
@@ -33,7 +33,8 @@ class _MyAppState extends State<MyApp> {
     try {
       // Check if we have the tessdata_config.json file
       try {
-        final config = await DefaultAssetBundle.of(context).loadString('assets/tessdata_config.json');
+        final config = await DefaultAssetBundle.of(context)
+            .loadString('assets/tessdata_config.json');
         print('DEBUG: Found tessdata_config.json: $config');
       } catch (e) {
         print('ERROR: Could not load tessdata_config.json: $e');
@@ -41,7 +42,8 @@ class _MyAppState extends State<MyApp> {
 
       // Check if we have the eng.traineddata file
       try {
-        await DefaultAssetBundle.of(context).load('assets/tessdata/eng.traineddata');
+        await DefaultAssetBundle.of(context)
+            .load('assets/tessdata/eng.traineddata');
         print('DEBUG: Found eng.traineddata file');
       } catch (e) {
         print('ERROR: Could not load eng.traineddata: $e');
@@ -76,7 +78,8 @@ class _MyAppState extends State<MyApp> {
                           });
                         }
                       },
-                      items: OCREngine.values.map<DropdownMenuItem<OCREngine>>((OCREngine engine) {
+                      items: OCREngine.values
+                          .map<DropdownMenuItem<OCREngine>>((OCREngine engine) {
                         String text;
                         switch (engine) {
                           case OCREngine.defaultEngine:
@@ -106,7 +109,8 @@ class _MyAppState extends State<MyApp> {
                       child: Text('Select image'),
                       onPressed: () async {
                         final ImagePicker picker = ImagePicker();
-                        final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                        final XFile? image =
+                            await picker.pickImage(source: ImageSource.gallery);
                         if (image == null) return;
 
                         setState(() {
@@ -118,13 +122,17 @@ class _MyAppState extends State<MyApp> {
 
                         try {
                           print('DEBUG: Starting OCR on image: ${image.path}');
-                          print('DEBUG: Image exists: ${await File(image.path).exists()}');
-                          print('DEBUG: Image size: ${await File(image.path).length()} bytes');
+                          print(
+                              'DEBUG: Image exists: ${await File(image.path).exists()}');
+                          print(
+                              'DEBUG: Image size: ${await File(image.path).length()} bytes');
 
                           // Get tesseract language (used for Tesseract engine)
-                          const language = 'eng'; // You can change this to match your trained data
+                          const language =
+                              'eng'; // You can change this to match your trained data
                           print('DEBUG: Using language: $language');
-                           print('DEBUG: Using engine: ${_selectedEngine.toString().split('.').last}');
+                          print(
+                              'DEBUG: Using engine: ${_selectedEngine.toString().split('.').last}');
 
                           // Define OCR configuration based on selected engine
                           final ocrConfig = OCRConfig(
@@ -145,7 +153,8 @@ class _MyAppState extends State<MyApp> {
                           );
                           _scanTime = watch.elapsedMilliseconds;
 
-                          print('DEBUG: OCR complete, result length: ${_extractText.length}');
+                          print(
+                              'DEBUG: OCR complete, result length: ${_extractText.length}');
                           print('DEBUG: Scanning took $_scanTime ms');
 
                           if (_debugMode) {
@@ -162,9 +171,7 @@ class _MyAppState extends State<MyApp> {
                         }
                       },
                     ),
-                    _scanning
-                        ? CircularProgressIndicator()
-                        : Icon(Icons.done),
+                    _scanning ? CircularProgressIndicator() : Icon(Icons.done),
                   ],
                 ),
                 SizedBox(height: 16),
