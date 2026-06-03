@@ -3,16 +3,28 @@
 A Flutter plugin that provides Optical Character Recognition (OCR) capabilities using Tesseract (v4.x) and Apple Vision (iOS).
 
 This plugin utilizes:
-*   **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
-*   **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
+
+- **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
+- **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
+
+## Sponsor
+
+[![https://zuzu.dev](./assets/zikzak-ai.png)](https://zuzu.dev) [![Sponsored by ZikZak AI](https://img.shields.io/badge/Sponsored%20by-ZikZak%20AI-8A2BE2?style=flat-square&logo=heart)](https://zuzu.dev)
+
+Thanks to ZikZak AI for sponsoring this project!
+
+ZikZak AI is an AI-Powered Price Comparison app that you scan barcodes, and discover amazing savings instantly. Your personal shopping assistant that never sleeps.
+
+<a href="https://apps.apple.com/tr/app/zik-zak/id1563425450"><img src="assets/app-store-badge.png" width="160" style="margin-right: 8px;"></a>
+<a href="https://play.google.com/store/apps/details?id=dev.zuzu.zingo"><img src="assets/google-play-badge.png" width="160"></a>
 
 ## Features
 
-*   Perform OCR on images to extract text.
-*   Support for multiple OCR engines: Tesseract (iOS/Android), Apple Vision (iOS).
-*   Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
-*   Supports the latest Dart and Android SDKs.
-*   Includes a custom CocoaPods setup to enable using SwiftyTesseract 4.0.1 on iOS.
+- Perform OCR on images to extract text.
+- Support for multiple OCR engines: Tesseract (iOS/Android), Apple Vision (iOS).
+- Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
+- Supports the latest Dart and Android SDKs.
+- Includes a custom CocoaPods setup to enable using SwiftyTesseract 4.0.1 on iOS.
 
 ## Getting Started
 
@@ -47,6 +59,7 @@ For the Tesseract engine to work, you need to include language trained data file
       ]
     }
     ```
+
 4.  **Declare Assets in `pubspec.yaml`:** Add your `assets` and `assets/tessdata` directories to the `assets` section of your `pubspec.yaml`:
 
     ```yaml
@@ -55,6 +68,7 @@ For the Tesseract engine to work, you need to include language trained data file
         - assets/tessdata_config.json
         - assets/tessdata/
     ```
+
     Run `flutter pub get` again.
 
 The plugin will automatically copy these trained data files to the application's documents directory on the first run if they are not already present.
@@ -62,6 +76,7 @@ The plugin will automatically copy these trained data files to the application's
 **Note on Asset Loading Issues:** If you encounter asset loading errors or "Data path must not be null!" errors, ensure your setup follows these exact requirements:
 
 1. **Directory Structure:**
+
    ```
    your_project/
    ├── assets/
@@ -73,6 +88,7 @@ The plugin will automatically copy these trained data files to the application's
    ```
 
 2. **pubspec.yaml assets section:**
+
    ```yaml
    flutter:
      assets:
@@ -83,13 +99,12 @@ The plugin will automatically copy these trained data files to the application's
 3. **tessdata_config.json content:**
    ```json
    {
-     "files": [
-       "eng.traineddata"
-     ]
+     "files": ["eng.traineddata"]
    }
    ```
 
 **Troubleshooting:**
+
 - Ensure `.traineddata` files are in `assets/tessdata/` directory
 - Verify all language files listed in `tessdata_config.json` actually exist
 - Try adding individual file entries in pubspec.yaml if assets fail to load:
@@ -102,7 +117,9 @@ The plugin will automatically copy these trained data files to the application's
 ## Common Issues and Solutions
 
 ### "Data path must not be null!" Error
+
 This error typically occurs when:
+
 - The tessdata files are not properly loaded from assets
 - The `tessdata_config.json` file is missing or incorrectly formatted
 - Asset paths in `pubspec.yaml` are not correctly configured
@@ -110,14 +127,17 @@ This error typically occurs when:
 **Solution:** Follow the exact directory structure and configuration shown above.
 
 ### "Unable to load asset" Error
+
 This happens when Flutter cannot find the specified asset files.
 
 **Solution:**
+
 1. Verify file names match exactly between `tessdata_config.json` and actual files
 2. Ensure proper asset declarations in `pubspec.yaml`
 3. Try running `flutter clean` and `flutter pub get`
 
 ### Path Duplication Issues (M1 Macs)
+
 Some users on M1 Macs may see paths like `assets/tessdata/assets/tessdata/file.traineddata`.
 
 **Solution:** The plugin automatically handles this, but ensure you're using the latest version.
@@ -141,6 +161,7 @@ SwiftyTesseract 4.0.x uses Swift Package Manager and removed CocoaPods support. 
     ├── libtesseract.xcframework  <-- Place the extracted folder here
     └── ... (other iOS files)
     ```
+
 3.  **Configure Your App's Podfile**: In your Flutter app's `ios/Podfile`, you need to reference the custom podspecs provided within the `tesseract_ocr` plugin using the `:path` option.
 
     Locate your `target 'Runner'` block and add the following lines:
@@ -172,6 +193,7 @@ SwiftyTesseract 4.0.x uses Swift Package Manager and removed CocoaPods support. 
     ```
 
     **Note:** The `:path` value `../../.symlinks/plugins/tesseract_ocr/ios` is the standard path from your app's `ios` directory to a plugin's `ios` directory when using Flutter. If your project structure is different, you may need to adjust this path.
+
 4.  **Install Pods**: Navigate to your `ios` directory in the terminal and run `pod install`:
 
     ```bash
@@ -242,12 +264,12 @@ Future<void> _performOcr(String imagePath) async {
 
 The `OCRConfig` class allows detailed configuration of the OCR process:
 
-*   `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
-*   `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS, Tesseract on Android).
-*   `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
-*   `options` (Map<String, dynamic>?): A map of additional configuration options.
-    *   For the **Tesseract** engine, these are passed directly to the Tesseract API. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings.
-    *   For the **Vision** engine (iOS), limited options might be supported depending on the native implementation (currently, primarily language hint via `language`).
+- `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
+- `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS, Tesseract on Android).
+- `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
+- `options` (Map<String, dynamic>?): A map of additional configuration options.
+  - For the **Tesseract** engine, these are passed directly to the Tesseract API. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings.
+  - For the **Vision** engine (iOS), limited options might be supported depending on the native implementation (currently, primarily language hint via `language`).
 
 See `ocr_engine_config.dart` for the `OCREngine`, `TesseractConfig`, and `PageSegmentationMode` enums and classes.
 
