@@ -1,6 +1,17 @@
 group 'io.paratoner.tesseract_ocr'
 version '1.0'
 
+rootProject.allprojects {
+    repositories {
+        maven {
+            url 'https://jitpack.io'
+            content {
+                includeGroup 'cz.adaptech.tesseract4android'
+            }
+        }
+    }
+}
+
 apply plugin: 'com.android.library'
 
 android {
