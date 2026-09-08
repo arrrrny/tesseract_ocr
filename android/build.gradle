@@ -24,19 +24,25 @@ rootProject.allprojects {
 }
 
 apply plugin: 'com.android.library'
-
 android {
     namespace 'io.paratoner.tesseract_ocr'
     compileSdkVersion 35
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
 
     defaultConfig {
         minSdkVersion 16
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
     lintOptions {
         disable 'InvalidPackage'
     }
-    packagingOptions{
+
+    packagingOptions {
         doNotStrip '*/mips/*.so'
         doNotStrip '*/mips64/*.so'
     }
