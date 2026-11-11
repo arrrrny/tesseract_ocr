@@ -7,16 +7,19 @@ This plugin utilizes:
 - **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
 - **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
 
-## Sponsor
+<!-- ZURAFFA-LAUNCH-PROMO (valid until Dec 1, 2026) -->
+## 🦒 Zuraffa Browser — Launch Offer
 
-[![https://zuzu.dev](./assets/zikzak-ai.png)](https://zuzu.dev) [![Sponsored by ZikZak AI](https://img.shields.io/badge/Sponsored%20by-ZikZak%20AI-8A2BE2?style=flat-square&logo=heart)](https://zuzu.dev)
+<div align="center">
+  <a href="https://zuraffa.com"><img src="https://zuraffa.com/img/zuraffa-browser-home.jpg" alt="Zuraffa Browser — 10 Browsers. One window." width="720"></a>
+</div>
 
-Thanks to ZikZak AI for sponsoring this project!
+From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — the multi-tasking browser for AI agents & humans — is live on the **[Mac App Store](https://apps.apple.com/app/id6811352058)**.
 
-ZikZak AI is an AI-Powered Price Comparison app that you scan barcodes, and discover amazing savings instantly. Your personal shopping assistant that never sleeps.
+🎁 **Launch offer: 6 months free with code `ZURAFFA`** — no credit card, no subscription, no payment. Redeem in-app until **Dec 1, 2026**.
 
-<a href="https://apps.apple.com/tr/app/zik-zak/id1563425450"><img src="assets/app-store-badge.png" width="160" style="margin-right: 8px;"></a>
-<a href="https://play.google.com/store/apps/details?id=dev.zuzu.zingo"><img src="assets/google-play-badge.png" width="160"></a>
+[**Download Zuraffa Browser →**](https://apps.apple.com/app/id6811352058)
+
 
 ## Features
 
