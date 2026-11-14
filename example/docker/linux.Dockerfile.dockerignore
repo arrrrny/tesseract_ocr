@@ -1,0 +1,17 @@
+# Keep the build context small: only source, assets, and lockfiles matter.
+.git
+**/build/
+**/.dart_tool/
+**/.gradle/
+**/.idea/
+**/Pods/
+ios/Assets
+android/.settings
+android/.gradle
+example/ios/Pods
+example/android/.gradle
+example/macos
+example/windows
+example/ios
+example/android
+*.iml
