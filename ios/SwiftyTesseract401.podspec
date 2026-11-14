@@ -20,8 +20,10 @@ This podspec allows using SwiftyTesseract 4.0.1 from GitHub with CocoaPods.
   
   # libtesseract 0.0.x is an unrelated pod on trunk whose podspec excludes the
   # arm64 simulator slice, which would force EXCLUDED_ARCHS into every app that
-  # integrates this pod. Only the 0.2.0 xcframework ships an arm64 simulator slice.
-  s.dependency 'libtesseract', '>= 0.2.0'
+  # integrates this pod. Only the 0.2.x xcframework line ships an arm64 simulator
+  # slice, and the pin keeps a future 0.3/1.0 from silently changing that binary
+  # contract.
+  s.dependency 'libtesseract', '~> 0.2.0'
   
   s.libraries = 'z', 'c++'
   

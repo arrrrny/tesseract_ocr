@@ -9,23 +9,24 @@ This custom setup involves:
 2.  A local podspec, `SwiftyTesseract401.podspec`, is provided within the plugin's `ios` directory. This podspec points directly to the SwiftyTesseract 4.0.1 tag on GitHub.
 3.  SwiftyTesseract 4.0.1 itself depends on `libtesseract`, which is also not available on CocoaPods. A local podspec, `libtesseract.podspec`, is provided to make the `libtesseract.xcframework` available via CocoaPods.
 
-**Important:** For this custom CocoaPods setup to work, you **must** manually obtain and include the `libtesseract.xcframework` in your project.
+**Important:** For this custom CocoaPods setup to work, you **must** manually obtain and include the `libtesseract.xcframework` **in the plugin's `ios` directory** — the directory that contains `libtesseract.podspec`. It does not go in your app's `ios` directory.
 
 ## Prerequisites
 
-1.  **Download `libtesseract.xcframework`**: Download the `libtesseract.xcframework.zip` file for version `0.2.0` from the [libtesseract GitHub Releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0).
-2.  **Extract and Place**: Unzip the downloaded file and place the resulting `libtesseract.xcframework` folder directly into your Flutter app's `ios` directory (the same directory where your main `Podfile` is located).
+1.  **Download `libtesseract.xcframework`**: Download the `libtesseract-0.2.0.xcframework.zip` file for version `0.2.0` from the [libtesseract GitHub Releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0).
+2.  **Extract and Place**: Unzip the downloaded file and place the resulting `libtesseract.xcframework` folder into the **plugin's** `ios` directory, beside `libtesseract.podspec` — not into your Flutter app's `ios` directory.
 
-    Your `ios` directory structure should look something like this:
+    The pod is consumed by `:path` from the plugin's `ios` directory and the podspec resolves the xcframework relative to itself (`__dir__`), so this is the only location that works:
 
     ```
-    your_flutter_app/ios/
-    ├── Runner.xcodeproj
-    ├── Runner.xcworkspace
-    ├── Podfile         <-- Your main Podfile
-    ├── libtesseract.xcframework  <-- Place the extracted folder here
-    └── ... (other iOS files)
+    .symlinks/plugins/tesseract_ocr/ios/
+    ├── libtesseract.podspec          <-- The podspec that consumes it
+    ├── libtesseract.xcframework      <-- Place the extracted folder here
+    ├── SwiftyTesseract401.podspec
+    └── tesseract_ocr.podspec
     ```
+
+    If the binary is missing, `pod install` now fails loudly (the podspec raises) instead of silently dropping the vendored framework and failing later with a link error or `Couldn't find module`.
 
 ## Configure Your Podfile
 
@@ -73,9 +74,9 @@ cd your_flutter_app/ios
 pod install
 ```
 
-CocoaPods should now be able to find and install the `SwiftyTesseract401` and `libtesseract` pods using the provided custom podspecs and the `libtesseract.xcframework` located in your `ios` directory.
+CocoaPods should now be able to find and install the `SwiftyTesseract401` and `libtesseract` pods using the provided custom podspecs and the `libtesseract.xcframework` located in the plugin's `ios` directory.
 
 ## Important Considerations
 
-*   **`libtesseract.xcframework` Distribution**: Since the `libtesseract.podspec` references the xcframework by a local file path, anyone who clones your repository and builds the app will need to also have `libtesseract.xcframework` in the correct location (`your_flutter_app/ios/libtesseract.xcframework`). You may need to consider adding this xcframework to your repository (potentially using Git LFS if it's large) or providing separate instructions for obtaining it.
-*   **Plugin Users**: If you are the author of the `tesseract_ocr` plugin, users integrating your plugin into *their* apps via CocoaPods will need to follow these steps in *their* app's `ios` directory. The custom podspecs are now part of your plugin's distribution, but the `libtesseract.xcframework` itself is not automatically included by CocoaPods when using `:path`.
+*   **`libtesseract.xcframework` Distribution**: Since the `libtesseract.podspec` references the xcframework by a local file path relative to itself, anyone who clones the plugin's repository and builds an app against the CocoaPods path will need `libtesseract.xcframework` present in the plugin's `ios` directory (`<plugin>/ios/libtesseract.xcframework`). The binary is not committed to this repository — obtain it from the releases page above, or consider adding it to your own checkout (potentially using Git LFS if it's large).
+*   **Plugin Users**: If you are the author of the `tesseract_ocr` plugin, users integrating your plugin into *their* apps via CocoaPods will need to place `libtesseract.xcframework` in the **plugin's** `ios` directory (the `.symlinks/plugins/tesseract_ocr/ios` path above), not in their app's own `ios` directory. The custom podspecs are part of your plugin's distribution, but the `libtesseract.xcframework` itself is not automatically included by CocoaPods when using `:path`.

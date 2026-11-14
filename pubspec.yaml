@@ -32,7 +32,6 @@ flutter:
         pluginClass: TesseractOcrPlugin
       ios:
         pluginClass: TesseractOcrPlugin
-        sharedDarwinSource: true
       macos:
         pluginClass: TesseractOcrPlugin
         sharedDarwinSource: true
