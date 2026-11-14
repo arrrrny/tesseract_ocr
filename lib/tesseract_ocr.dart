@@ -18,6 +18,13 @@ class TesseractOcr {
 
   static bool get _isWeb => debugIsWebOverride ?? kIsWeb;
 
+  @visibleForTesting
+  static bool? debugIsMacOSOverride;
+
+  static bool get _isMacOS =>
+      debugIsMacOSOverride ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS);
+
   static Future<String> extractText(
     String imagePath, {
     OCRConfig? config,
@@ -41,6 +48,12 @@ class TesseractOcr {
           imagePath,
           'imagePath',
           'Image file does not exist',
+        );
+      }
+      if (_isMacOS && actualConfig.engine == OCREngine.vision) {
+        throw UnsupportedError(
+          'OCREngine.vision is only supported on iOS. '
+          'Use OCREngine.tesseract or OCREngine.defaultEngine on macOS.',
         );
       }
     }

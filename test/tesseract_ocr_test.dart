@@ -48,6 +48,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMessageHandler('flutter/assets', null);
     TesseractOcr.debugIsWebOverride = null;
+    TesseractOcr.debugIsMacOSOverride = null;
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
@@ -66,8 +67,16 @@ void main() {
     );
   });
 
-  test(
-      'extractText throws FileSystemException on IO when image file is missing',
+  test('pubspec.yaml registers macos as a supported plugin platform', () async {
+    final pubspec = await File('pubspec.yaml').readAsString();
+    expect(pubspec, contains('macos:'));
+    expect(
+      pubspec,
+      matches(RegExp(r'macos:\s*\n\s*pluginClass:\s*TesseractOcrPlugin')),
+    );
+  });
+
+  test('extractText throws ArgumentError on IO when image file is missing',
       () async {
     final missingPath = '${tempDir.path}/does_not_exist.png';
     await expectLater(
@@ -149,9 +158,20 @@ void main() {
     });
 
     final result = await TesseractOcr.extractText(imageFile.path);
+
     expect(result, 'recognized text');
-    expect(
-        File('${tempDir.path}/tessdata/eng.traineddata').existsSync(), isTrue);
+    expect(recordedCalls, hasLength(1));
+    final args = Map<String, dynamic>.from(
+      recordedCalls.single.arguments as Map,
+    );
+    expect(args['imagePath'], imageFile.path);
+    expect(args['tessData'], tempDir.path);
+    expect(args['language'], 'eng');
+    expect(args['engine'], 'defaultEngine');
+
+    final copiedFile = File('${tempDir.path}/tessdata/eng.traineddata');
+    expect(copiedFile.existsSync(), isTrue);
+    expect(await copiedFile.readAsBytes(), fakeTrainedData);
   });
 
   group('WebHelper', () {
@@ -226,5 +246,59 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  test('extractText passes custom tessDataPath, engine, and options', () async {
+    final imageFile = File('${tempDir.path}/sample.png');
+    await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+    final customTessData = '${tempDir.path}/custom_tessdata';
+    await Directory(customTessData).create(recursive: true);
+
+    final result = await TesseractOcr.extractText(
+      imageFile.path,
+      config: OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+        tessDataPath: customTessData,
+        options: <String, dynamic>{
+          TesseractConfig.preserveInterwordSpaces: '1',
+          TesseractConfig.pageSegMode: PageSegmentationMode.singleBlock,
+        },
+      ),
+    );
+
+    expect(result, 'recognized text');
+    expect(recordedCalls, hasLength(1));
+    final args = Map<String, dynamic>.from(
+      recordedCalls.single.arguments as Map,
+    );
+    expect(args['imagePath'], imageFile.path);
+    expect(args['tessData'], customTessData);
+    expect(args['language'], 'eng');
+    expect(args['engine'], 'tesseract');
+    expect(args['options'], <String, dynamic>{
+      'preserve_interword_spaces': '1',
+      'tessedit_pageseg_mode': '6',
+    });
+  });
+
+  test('extractText rejects Apple Vision engine on macOS', () async {
+    final imageFile = File('${tempDir.path}/sample.png');
+    await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+    TesseractOcr.debugIsMacOSOverride = true;
+
+    await expectLater(
+      () => TesseractOcr.extractText(
+        imageFile.path,
+        config: const OCRConfig(
+          language: 'eng',
+          engine: OCREngine.vision,
+        ),
+      ),
+      throwsA(isA<UnsupportedError>()),
+    );
+    expect(recordedCalls, isEmpty);
   });
 }

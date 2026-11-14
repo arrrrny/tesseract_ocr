@@ -7,6 +7,7 @@ This plugin utilizes:
 - **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
 - **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
 - **Web:** [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1` WebAssembly) using the app's bundled `.traineddata` assets.
+- **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) CLI (`brew install tesseract`) using the bundled `.traineddata` assets.
 
 <!-- ZURAFFA-LAUNCH-PROMO (valid until Dec 1, 2026) -->
 ## 🦒 Zuraffa Browser — Launch Offer
@@ -25,7 +26,7 @@ From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — t
 ## Features
 
 - Perform OCR on images to extract text.
-- Support for multiple OCR engines: Tesseract (Android, iOS, and Web), Apple Vision (iOS only).
+- Support for multiple OCR engines: Tesseract (Android, iOS, macOS, and Web), Apple Vision (iOS only).
 - Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
 - Supports the latest Dart and Android SDKs.
 - Includes a custom CocoaPods setup to enable using SwiftyTesseract 4.0.1 on iOS.
@@ -217,6 +218,25 @@ Web support uses [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6
 - **Self-Hosting / Offline / Strict CSP:** If you prefer to self-host `tesseract.js` or restrict external scripts via CSP, include `<script src="...tesseract.min.js"></script>` in your `web/index.html` before `flutter_bootstrap.js`.
 - **Language Data:** Bundled `assets/tessdata/*.traineddata` files listed in `assets/tessdata_config.json` are served directly from Flutter Web's asset bundle (`gzip: false`), supporting both LSTM (`eng.traineddata`, `financial.traineddata`) and legacy (`OCRB.traineddata`) models. You can also supply a custom `OCRConfig(tessDataPath: ...)` URL.
 
+## macOS Setup & Prerequisites
+
+macOS support uses the **Tesseract** engine (`OCREngine.tesseract` / `OCREngine.defaultEngine`). Apple Vision (`OCREngine.vision`) remains iOS-only and is not supported on macOS. Language `.traineddata` files ship in your Flutter app's `assets/tessdata/` directory just like on mobile—no separate per-machine language setup is required for English (`eng`) or other bundled trained data.
+
+### Prerequisites
+
+1. **Flutter macOS Desktop Support**: Ensure Flutter macOS desktop is enabled (`flutter config --enable-macos-desktop`) along with Xcode and CocoaPods.
+2. **Install Tesseract via Homebrew**:
+   ```bash
+   brew install tesseract
+   ```
+   The plugin automatically discovers `tesseract` in `/opt/homebrew/bin/tesseract` (Apple Silicon), `/usr/local/bin/tesseract` (Intel), `/opt/local/bin/tesseract`, `/usr/bin/tesseract`, `PATH`, or via the `TESSERACT_PATH` environment variable.
+3. **Disable App Sandbox in Your macOS Runner Entitlements**: Because the macOS plugin invokes the installed `tesseract` binary as a subprocess, macOS App Sandbox must be disabled in `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
+   ```xml
+   <key>com.apple.security.app-sandbox</key>
+   <false/>
+   ```
+   (This is already configured in `example/macos/Runner/`.)
+
 ## Usage
 
 Import the package:
@@ -277,7 +297,7 @@ Future<void> _performOcr(String imagePath) async {
 The `OCRConfig` class allows detailed configuration of the OCR process:
 
 - `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
-- `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS; Tesseract on Android and Web).
+- `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS; Tesseract on Android, macOS, and Web).
 - `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
 - `options` (Map<String, dynamic>?): A map of additional configuration options.
   - For the **Tesseract** engine, these are passed directly to the Tesseract API. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings.
@@ -302,4 +322,19 @@ flutter run -d chrome
 ```bash
 cd example
 flutter test integration_test/tesseract_ocr_web_test.dart -d chrome
+```
+
+### Running the macOS Example App
+
+```bash
+cd example
+flutter pub get
+flutter run -d macos
+```
+
+### Running the macOS Integration Test
+
+```bash
+cd example
+flutter test integration_test/tesseract_ocr_macos_test.dart -d macos
 ```
