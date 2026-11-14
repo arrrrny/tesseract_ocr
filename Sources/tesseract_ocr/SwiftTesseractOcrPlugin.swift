@@ -173,9 +173,24 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
 
         // Perform OCR on a serial queue to prevent race conditions
         DispatchQueue(label: "com.tesseract.ocr", qos: .userInitiated).async {
+            // The timeout and the OCR completion can race: without this guard
+            // `result` would be called twice (once by whichever finishes first,
+            // once by the other) and a second FlutterResult call crashes the app.
+            let resultLock = NSLock()
+            var didComplete = false
+            let completeOnce: (Any?) -> Void = { value in
+                resultLock.lock()
+                defer { resultLock.unlock() }
+                guard !didComplete else { return }
+                didComplete = true
+                DispatchQueue.main.async {
+                    result(value)
+                }
+            }
+
             // Set up timeout
             let timeoutWorkItem = DispatchWorkItem {
-                result(FlutterError(
+                completeOnce(FlutterError(
                     code: "OCR_TIMEOUT",
                     message: "OCR operation timed out after 30 seconds",
                     details: nil
@@ -190,17 +205,13 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             
             switch ocrResult {
             case .success(let recognizedText):
-                DispatchQueue.main.async {
-                    result(recognizedText)
-                }
+                completeOnce(recognizedText)
             case .failure(let error):
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "OCR_PROCESS_ERROR",
-                        message: "Tesseract OCR failed: \(error.localizedDescription)",
-                        details: nil
-                    ))
-                }
+                completeOnce(FlutterError(
+                    code: "OCR_PROCESS_ERROR",
+                    message: "Tesseract OCR failed: \(error.localizedDescription)",
+                    details: nil
+                ))
             }
         }
     }

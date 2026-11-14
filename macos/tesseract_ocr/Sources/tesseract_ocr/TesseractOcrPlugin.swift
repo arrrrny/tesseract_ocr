@@ -205,6 +205,21 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
     }
 
     ocrQueue.async {
+      // The timeout and the OCR completion can race: without this guard
+      // `result` would be called twice (once by whichever finishes first,
+      // once by the other) and a second FlutterResult call crashes the app.
+      let resultLock = NSLock()
+      var didComplete = false
+      let completeOnce: (Any?) -> Void = { value in
+        resultLock.lock()
+        defer { resultLock.unlock() }
+        guard !didComplete else { return }
+        didComplete = true
+        DispatchQueue.main.async {
+          result(value)
+        }
+      }
+
       let process = Process()
       process.executableURL = URL(fileURLWithPath: tesseractExecutable)
       process.arguments = arguments
@@ -222,16 +237,14 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       do {
         try process.run()
       } catch {
-        DispatchQueue.main.async {
-          result(
-            FlutterError(
-              code: "TESSERACT_LAUNCH_FAILED",
-              message:
-                "Failed to launch Tesseract at '\(tesseractExecutable)': \(error.localizedDescription). If App Sandbox is enabled, disable com.apple.security.app-sandbox in your macOS entitlements.",
-              details: nil
-            )
+        completeOnce(
+          FlutterError(
+            code: "TESSERACT_LAUNCH_FAILED",
+            message:
+              "Failed to launch Tesseract at '\(tesseractExecutable)': \(error.localizedDescription). If App Sandbox is enabled, disable com.apple.security.app-sandbox in your macOS entitlements.",
+            details: nil
           )
-        }
+        )
         return
       }
 
@@ -254,15 +267,13 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       let timeoutWorkItem = DispatchWorkItem {
         if process.isRunning {
           process.terminate()
-          DispatchQueue.main.async {
-            result(
-              FlutterError(
-                code: "OCR_TIMEOUT",
-                message: "OCR operation timed out after 30 seconds",
-                details: nil
-              )
+          completeOnce(
+            FlutterError(
+              code: "OCR_TIMEOUT",
+              message: "OCR operation timed out after 30 seconds",
+              details: nil
             )
-          }
+          )
         }
       }
 
@@ -276,24 +287,22 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       let stderrText = (String(data: stderrData, encoding: .utf8) ?? "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
 
-      DispatchQueue.main.async {
-        if process.terminationStatus == 0 {
-          let cleaned = stdoutText.trimmingCharacters(
-            in: CharacterSet(charactersIn: "\u{000C}")
+      if process.terminationStatus == 0 {
+        let cleaned = stdoutText.trimmingCharacters(
+          in: CharacterSet(charactersIn: "\u{000C}")
+        )
+        completeOnce(cleaned)
+      } else {
+        let message = stderrText.isEmpty
+          ? "Tesseract failed with exit status \(process.terminationStatus) for image '\(imagePath)'."
+          : "Tesseract failed (exit status \(process.terminationStatus)): \(stderrText)"
+        completeOnce(
+          FlutterError(
+            code: "OCR_PROCESS_ERROR",
+            message: message,
+            details: nil
           )
-          result(cleaned)
-        } else {
-          let message = stderrText.isEmpty
-            ? "Tesseract failed with exit status \(process.terminationStatus) for image '\(imagePath)'."
-            : "Tesseract failed (exit status \(process.terminationStatus)): \(stderrText)"
-          result(
-            FlutterError(
-              code: "OCR_PROCESS_ERROR",
-              message: message,
-              details: nil
-            )
-          )
-        }
+        )
       }
     }
   }

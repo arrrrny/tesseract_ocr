@@ -2,7 +2,7 @@ name: tesseract_ocr
 description: Tesseract 4 adds a new neural net (LSTM) based OCR engine which is
   focused on line recognition. It has unicode (UTF-8) support, and can recognize
   more than 100 languages.
-version: 0.5.1
+version: 0.6.0
 homepage: https://github.com/arrrrny/tesseract_ocr
 
 environment:

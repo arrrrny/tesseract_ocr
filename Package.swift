@@ -3,6 +3,12 @@
 
 import PackageDescription
 
+// NOTE: this conditional is evaluated on the machine running `swift build`
+// (the host), not on the target platform. That is fine for Flutter plugins —
+// each platform builds natively, so a macOS build always takes the #else
+// (Apple) branch and a Linux build always takes the Linux branch. It does mean
+// the manifest cannot cross-compile: an Apple-host build cannot produce a Linux
+// binary, and vice versa.
 #if os(Linux)
 // Linux configuration: uses system tesseract via C++ interop
 let package = Package(
