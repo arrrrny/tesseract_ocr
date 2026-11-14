@@ -33,6 +33,9 @@ Future<void> _copyTessDataToAppDocumentsDirectory(
   final Map<String, dynamic> files = jsonDecode(config) as Map<String, dynamic>;
   for (final file in files['files'] as List<dynamic>) {
     final fileName = file.toString();
+    if (fileName.contains('..') || fileName.startsWith('/')) {
+      throw ArgumentError('Invalid file name in tessdata_config.json: $fileName');
+    }
     final assetPath = join(tessDataPathAsset, fileName);
     final destFile = File(join(tessdataDirectory, fileName));
     if (!await destFile.exists()) {
