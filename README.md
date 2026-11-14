@@ -338,3 +338,17 @@ flutter run -d macos
 cd example
 flutter test integration_test/tesseract_ocr_macos_test.dart -d macos
 ```
+
+## Web Setup (Tesseract.js)
+
+Web support uses [tesseract.js](https://github.com/naptha/tesseract.js) compiled to WebAssembly. The library is loaded dynamically from a CDN on first use.
+
+### Content Security Policy (CSP)
+
+If your app uses a strict Content Security Policy, you must allowlist the jsDelivr CDN in your `web/index.html`:
+
+```html
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' https://cdn.jsdelivr.net;">
+```
+
+Alternatively, you can self-host `tesseract.min.js` by including it in your `web/index.html` before the Flutter bootstrap script.

@@ -2,6 +2,8 @@ import Cocoa
 import FlutterMacOS
 
 public class TesseractOcrPlugin: NSObject, FlutterPlugin {
+  private let ocrQueue = DispatchQueue(label: "com.tesseract.ocr", qos: .userInitiated)
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
       name: "tesseract_ocr",
@@ -57,6 +59,17 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
         FlutterError(
           code: "MISSING_PARAMS",
           message: "Required parameter 'imagePath' is missing.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard !imagePath.contains(where: { ";|&$`\n\r".contains($0) }) else {
+      result(
+        FlutterError(
+          code: "INVALID_PATH",
+          message: "Image path contains invalid characters",
           details: nil
         )
       )
@@ -191,7 +204,7 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       arguments.append("hocr")
     }
 
-    DispatchQueue.global(qos: .userInitiated).async {
+    ocrQueue.async {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: tesseractExecutable)
       process.arguments = arguments
@@ -238,8 +251,26 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
         ioGroup.leave()
       }
 
+      let timeoutWorkItem = DispatchWorkItem {
+        if process.isRunning {
+          process.terminate()
+          DispatchQueue.main.async {
+            result(
+              FlutterError(
+                code: "OCR_TIMEOUT",
+                message: "OCR operation timed out after 30 seconds",
+                details: nil
+              )
+            )
+          }
+        }
+      }
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 30.0, execute: timeoutWorkItem)
+
       ioGroup.wait()
       process.waitUntilExit()
+      timeoutWorkItem.cancel()
 
       let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
       let stderrText = (String(data: stderrData, encoding: .utf8) ?? "")
