@@ -38,39 +38,45 @@ _ResolvedTessData? _resolvedTessData;
 @visibleForTesting
 void debugResetTessDataCache() => _resolvedTessData = null;
 
-Future<String> loadTessDataToAppDocuments(
+Future<String?> loadTessDataToAppDocuments(
   String tessDataConfigAsset,
   String tessDataPathAsset,
 ) async {
-  final Directory appDirectory = await getApplicationDocumentsDirectory();
-  final Directory tessdataDirectory = Directory(
-    join(appDirectory.path, 'tessdata'),
-  );
-  if (!await tessdataDirectory.exists()) {
-    await tessdataDirectory.create(recursive: true);
-  }
-  final _ResolvedTessData resolved = await _resolveTessData(
-    tessDataConfigAsset,
-    tessDataPathAsset,
-  );
-  // The engine is about to read this directory: never hand it a tessdata set
-  // that is missing a declared file or holds an empty one (issue #52).
-  for (int i = 0; i < resolved.fileNames.length; i++) {
-    final String fileName = resolved.fileNames[i];
-    final File destFile = File(join(tessdataDirectory.path, fileName));
-    final Uint8List? destinationBytes = await destFile.exists()
-        ? await destFile.readAsBytes()
-        : null;
-    if (!TessDataAssets.needsCopy(
-      assetBytes: resolved.assets[i],
-      knownLength: null,
-      destinationBytes: destinationBytes,
-    )) {
-      continue;
+  try {
+    final Directory appDirectory = await getApplicationDocumentsDirectory();
+    final Directory tessdataDirectory = Directory(
+      join(appDirectory.path, 'tessdata'),
+    );
+    if (!await tessdataDirectory.exists()) {
+      await tessdataDirectory.create(recursive: true);
     }
-    await destFile.writeAsBytes(resolved.assets[i], flush: true);
+    final _ResolvedTessData resolved = await _resolveTessData(
+      tessDataConfigAsset,
+      tessDataPathAsset,
+    );
+    // The engine is about to read this directory: never hand it a tessdata set
+    // that is missing a declared file or holds an empty one (issue #52).
+    for (int i = 0; i < resolved.fileNames.length; i++) {
+      final String fileName = resolved.fileNames[i];
+      final File destFile = File(join(tessdataDirectory.path, fileName));
+      final Uint8List? destinationBytes = await destFile.exists()
+          ? await destFile.readAsBytes()
+          : null;
+      if (!TessDataAssets.needsCopy(
+        assetBytes: resolved.assets[i],
+        knownLength: null,
+        destinationBytes: destinationBytes,
+      )) {
+        continue;
+      }
+      await destFile.writeAsBytes(resolved.assets[i], flush: true);
+    }
+    return appDirectory.path;
+  } on MissingPlatformDirectoryException {
+    // Headless Linux without XDG user dirs: skip the asset copy and let the
+    // native plugin fall back to the system tessdata.
+    return null;
   }
-  return appDirectory.path;
 }
 
 Future<_ResolvedTessData> _resolveTessData(
