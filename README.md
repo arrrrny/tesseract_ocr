@@ -7,7 +7,8 @@ This plugin utilizes:
 - **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
 - **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
 - **Web:** [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1` WebAssembly) using the app's bundled `.traineddata` assets.
-- **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) CLI (`brew install tesseract`) using the bundled `.traineddata` assets.
+- **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) via Swift Package Manager using the bundled `.traineddata` assets.
+- **Linux:** System [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and Leptonica libraries via C++ CMake plugin.
 
 <!-- ZURAFFA-LAUNCH-PROMO (valid until Dec 1, 2026) -->
 ## 🦒 Zuraffa Browser — Launch Offer
@@ -421,6 +422,28 @@ flutter run -d macos
 ```bash
 cd example
 flutter test integration_test/tesseract_ocr_macos_test.dart -d macos
+```
+
+### Running the Linux Example App
+
+```bash
+cd example
+flutter pub get
+flutter run -d linux
+```
+
+### Running the Linux Integration Test
+
+```bash
+cd example
+flutter test integration_test/tesseract_ocr_linux_test.dart -d linux
+```
+
+### Running the Linux Integration Test in Docker (headless)
+
+```bash
+docker build -f example/docker/linux.Dockerfile -t tesseract-ocr-linux-test .
+docker run --rm tesseract-ocr-linux-test
 ```
 
 ## Web Setup (Tesseract.js)
