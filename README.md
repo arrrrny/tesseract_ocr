@@ -6,6 +6,7 @@ This plugin utilizes:
 
 - **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
 - **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
+- **Web:** [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1` WebAssembly) using the app's bundled `.traineddata` assets.
 
 <!-- ZURAFFA-LAUNCH-PROMO (valid until Dec 1, 2026) -->
 ## 🦒 Zuraffa Browser — Launch Offer
@@ -24,7 +25,7 @@ From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — t
 ## Features
 
 - Perform OCR on images to extract text.
-- Support for multiple OCR engines: Tesseract (iOS/Android), Apple Vision (iOS).
+- Support for multiple OCR engines: Tesseract (Android, iOS, and Web), Apple Vision (iOS only).
 - Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
 - Supports the latest Dart and Android SDKs.
 - Includes a custom CocoaPods setup to enable using SwiftyTesseract 4.0.1 on iOS.
@@ -208,6 +209,14 @@ SwiftyTesseract 4.0.x uses Swift Package Manager and removed CocoaPods support. 
 
 The plugin is configured to compile against the latest Android SDK (API 35) and has a minimum SDK version of 16, providing broad compatibility.
 
+## Web Setup (Tesseract.js)
+
+Web support uses [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1`) compiled to WebAssembly (`OCREngine.tesseract` / `OCREngine.defaultEngine`). Apple Vision (`OCREngine.vision`) remains iOS-only and throws an `UnsupportedError` on Web.
+
+- **Automatic CDN Loading:** By default, the Web plugin dynamically loads `tesseract.min.js` (`v6.0.1`) from jsDelivr on first use when `window.Tesseract` is not already present.
+- **Self-Hosting / Offline / Strict CSP:** If you prefer to self-host `tesseract.js` or restrict external scripts via CSP, include `<script src="...tesseract.min.js"></script>` in your `web/index.html` before `flutter_bootstrap.js`.
+- **Language Data:** Bundled `assets/tessdata/*.traineddata` files listed in `assets/tessdata_config.json` are served directly from Flutter Web's asset bundle (`gzip: false`), supporting both LSTM (`eng.traineddata`, `financial.traineddata`) and legacy (`OCRB.traineddata`) models. You can also supply a custom `OCRConfig(tessDataPath: ...)` URL.
+
 ## Usage
 
 Import the package:
@@ -268,7 +277,7 @@ Future<void> _performOcr(String imagePath) async {
 The `OCRConfig` class allows detailed configuration of the OCR process:
 
 - `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
-- `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS, Tesseract on Android).
+- `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS; Tesseract on Android and Web).
 - `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
 - `options` (Map<String, dynamic>?): A map of additional configuration options.
   - For the **Tesseract** engine, these are passed directly to the Tesseract API. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings.
@@ -279,3 +288,18 @@ See `ocr_engine_config.dart` for the `OCREngine`, `TesseractConfig`, and `PageSe
 ## Example
 
 Check the `example` directory for a complete Flutter app demonstrating how to use the plugin, select images, choose the OCR engine, and display results.
+
+### Running the Web Example App
+
+```bash
+cd example
+flutter pub get
+flutter run -d chrome
+```
+
+### Running the Web Integration Test
+
+```bash
+cd example
+flutter test integration_test/tesseract_ocr_web_test.dart -d chrome
+```

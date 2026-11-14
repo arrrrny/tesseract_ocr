@@ -1,81 +1,74 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart';
-import 'package:tesseract_ocr/ocr_engine_config.dart'; // Import OCRConfig
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+import 'package:tesseract_ocr/src/io_helper.dart' as io_helper;
 
 class TesseractOcr {
   static const String TESS_DATA_CONFIG = 'assets/tessdata_config.json';
+
   // Adjusted path to potentially fix asset loading duplication on some platforms
   static const String TESS_DATA_PATH = 'assets/tessdata';
-  static const MethodChannel _channel = const MethodChannel('tesseract_ocr');
+
+  static const MethodChannel _channel = MethodChannel('tesseract_ocr');
+
+  @visibleForTesting
+  static bool? debugIsWebOverride;
+
+  static bool get _isWeb => debugIsWebOverride ?? kIsWeb;
 
   static Future<String> extractText(
     String imagePath, {
-    OCRConfig? config, // Add optional OCRConfig parameter
+    OCRConfig? config,
   }) async {
-    assert(await File(imagePath).exists(), true);
-
-    // Use config if provided, otherwise create a default config
-    final actualConfig = config ?? const OCRConfig();
-
-    // If using Tesseract engine, ensure tessData is loaded
-    String? tessDataPath;
-    if (actualConfig.engine != OCREngine.vision) {
-      // Check if NOT Vision
-      tessDataPath = await _loadTessData();
+    if (imagePath.trim().isEmpty) {
+      throw ArgumentError.value(imagePath, 'imagePath', 'Must not be empty');
     }
 
-    // Build the arguments map
+    final actualConfig = config ?? const OCRConfig();
+
+    if (_isWeb) {
+      if (actualConfig.engine == OCREngine.vision) {
+        throw UnsupportedError(
+          'OCREngine.vision is only supported on iOS. '
+          'Use OCREngine.tesseract or OCREngine.defaultEngine on Web.',
+        );
+      }
+    } else {
+      if (!await io_helper.fileExists(imagePath)) {
+        throw ArgumentError.value(
+          imagePath,
+          'imagePath',
+          'Image file does not exist',
+        );
+      }
+    }
+
+    String? tessDataPath;
+    if (actualConfig.engine != OCREngine.vision) {
+      if (actualConfig.tessDataPath != null) {
+        tessDataPath = actualConfig.tessDataPath;
+      } else if (!_isWeb) {
+        tessDataPath = await io_helper.loadTessDataToAppDocuments(
+          TESS_DATA_CONFIG,
+          TESS_DATA_PATH,
+        );
+      }
+    }
+
     final Map<String, dynamic> args = {
       'imagePath': imagePath,
       'tessData': tessDataPath,
       'language': actualConfig.language,
+      'engine': actualConfig.engine.toString().split('.').last,
+      if (actualConfig.options != null) 'options': actualConfig.options,
     };
 
-    final String extractedText = await _channel.invokeMethod(
+    final String? extractedText = await _channel.invokeMethod<String>(
       'extractText',
       args,
     );
-
-    return extractedText;
-  }
-
-  static Future<String> _loadTessData() async {
-    final Directory appDirectory = await getApplicationDocumentsDirectory();
-    final String tessdataDirectory = join(appDirectory.path, 'tessdata');
-
-    if (!await Directory(tessdataDirectory).exists()) {
-      await Directory(tessdataDirectory).create();
-    }
-    await _copyTessDataToAppDocumentsDirectory(tessdataDirectory);
-    return appDirectory.path;
-  }
-
-  static Future _copyTessDataToAppDocumentsDirectory(
-    String tessdataDirectory,
-  ) async {
-    final String config = await rootBundle.loadString(TESS_DATA_CONFIG);
-    Map<String, dynamic> files = jsonDecode(config);
-    for (var file in files["files"]) {
-      final assetPath = join(TESS_DATA_PATH, file);
-      if (!await File(join(tessdataDirectory, file)).exists()) {
-        // Also use join for destination path existence check
-        final ByteData data = await rootBundle.load(
-          assetPath,
-        ); // Use the variable
-        final Uint8List bytes = data.buffer.asUint8List(
-          data.offsetInBytes,
-          data.lengthInBytes,
-        );
-        await File(
-          join(tessdataDirectory, file),
-        ).writeAsBytes(bytes); // Use join for destination path writing
-      }
-    }
+    return extractedText ?? '';
   }
 }

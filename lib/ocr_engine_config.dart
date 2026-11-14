@@ -9,12 +9,12 @@ enum OCREngine {
   /// Apple Vision OCR engine (iOS only)
   vision,
 
-  /// Tesseract OCR engine (iOS and Android)
+  /// Tesseract OCR engine (iOS, Android, and Web)
   tesseract,
 
   /// Default engine - platform specific
   /// On iOS: Vision
-  /// On Android: Tesseract
+  /// On Android and Web: Tesseract
   defaultEngine,
 }
 
@@ -22,13 +22,13 @@ enum OCREngine {
 class TesseractConfig {
   /// Whether to preserve spacing between words (1 or 0)
   static const String preserveInterwordSpaces = 'preserve_interword_spaces';
-  
+
   /// The page segmentation mode (PSM)
   static const String pageSegMode = 'tessedit_pageseg_mode';
-  
+
   /// The OCR engine mode (OEM)
   static const String ocrEngineMode = 'tessedit_ocr_engine_mode';
-  
+
   /// Path to a debug output file
   static const String debugFile = 'debug_file';
 }
@@ -37,40 +37,40 @@ class TesseractConfig {
 class PageSegmentationMode {
   /// Orientation and script detection only
   static const String osd = '0';
-  
+
   /// Automatic page segmentation with OSD
   static const String autoOsd = '1';
-  
+
   /// Automatic page segmentation, no OSD, no OCR
   static const String autoOnly = '2';
-  
+
   /// Fully automatic page segmentation, no OSD (default)
   static const String auto = '3';
-  
+
   /// Assume a single column of text of variable sizes
   static const String singleColumn = '4';
-  
+
   /// Assume a single uniform block of vertically aligned text
   static const String singleBlockVertText = '5';
-  
+
   /// Assume a single uniform block of text
   static const String singleBlock = '6';
-  
+
   /// Treat the image as a single text line
   static const String singleLine = '7';
-  
+
   /// Treat the image as a single word
   static const String singleWord = '8';
-  
+
   /// Treat the image as a single character
   static const String singleChar = '9';
-  
+
   /// Sparse text - Find as much text as possible in no particular order
   static const String sparseText = '10';
-  
+
   /// Sparse text with OSD
   static const String sparseTextOsd = '11';
-  
+
   /// Raw line - Treat the image as a single text line, bypassing hacks that are Tesseract-specific
   static const String rawLine = '12';
 }
@@ -87,10 +87,10 @@ class OCRConfig {
   final String? tessDataPath;
 
   /// Additional options for OCR engine
-  /// 
+  ///
   /// These values are passed directly to the OCR engine.
   /// For Tesseract, any valid Tesseract configuration variable can be set.
-  /// 
+  ///
   /// Common Tesseract options include:
   /// - 'preserve_interword_spaces': '0' or '1' (preserve spaces between words)
   /// - 'tessedit_pageseg_mode': Page segmentation mode (see [PageSegmentationMode])
