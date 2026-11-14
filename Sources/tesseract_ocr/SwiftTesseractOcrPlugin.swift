@@ -9,10 +9,21 @@ import AppKit
 #endif
 #if canImport(SwiftyTesseract)
 import SwiftyTesseract
-import libtesseract
 #endif
 
-/// Unified Tesseract OCR plugin for iOS, macOS, and Linux
+/// Unified Tesseract OCR plugin for iOS and macOS.
+///
+/// Two engines are reachable through one method channel:
+///
+/// - **Apple Vision** (`engine == "vision"`, iOS only) runs natively through
+///   the Vision framework. SwiftyTesseract is a Tesseract wrapper and has no
+///   Vision mode, so this path does not go through it.
+/// - **Tesseract** (`engine == "tesseract"`) and the platform default run
+///   through SwiftyTesseract.
+///
+/// The `engine` argument arrives at the TOP LEVEL of the method-call
+/// arguments, which is where the Dart layer puts it; a nested `config` map is
+/// accepted as a fallback for older callers.
 public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
@@ -28,18 +39,10 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         case "extractText":
             handleExtractText(call: call, result: result)
         case "isSupported":
-            handleIsSupported(result: result)
+            result(true)
         default:
             result(FlutterMethodNotImplemented)
         }
-    }
-
-    private func handleIsSupported(result: @escaping FlutterResult) {
-        #if canImport(SwiftyTesseract)
-        result(true)
-        #else
-        result(false)
-        #endif
     }
 
     private func handleExtractText(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -61,61 +64,65 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // Top level is the documented location; the nested map is a fallback
+        // for callers written against the pre-SPM plugin.
+        let config = args["config"] as? [String: Any]
+        let engine = (args["engine"] as? String) ?? (config?["engine"] as? String)
         let language = (args["language"] as? String) ?? "eng"
-        let tessData = args["tessData"] as? String
-        let rawConfig = (args["config"] as? [String: Any]) ?? args
 
-        // Resolve the engine locally. The Dart side sends a plain string
-        // ("vision" / "tesseract" / "defaultEngine"). Only "vision" routes to
-        // Apple Vision; every other value (including the "defaultEngine" sent by
-        // the historical default) stays on Tesseract so an iOS caller that omits
-        // `engine` keeps using tessData/options/languages instead of silently
-        // being downgraded to Vision (en/fr/de/es only).
-        let engineString = (rawConfig["engine"] as? String)?.lowercased()
-        let useVision = (engineString == "vision")
-
-        #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
-        if useVision {
-            performVisionOCR(
-                imagePath: imagePath,
-                language: language,
-                result: result
-            )
-        } else {
+        switch engine?.lowercased() {
+        case "vision":
+            #if canImport(UIKit)
+            performVisionOCR(imagePath: imagePath, language: language, result: result)
+            #else
+            result(FlutterError(
+                code: "UNSUPPORTED_ENGINE",
+                message: "Apple Vision is only supported on iOS. "
+                    + "Use OCREngine.tesseract or OCREngine.defaultEngine on macOS.",
+                details: nil
+            ))
+            #endif
+        case "tesseract", "lstm":
+            #if canImport(SwiftyTesseract)
             performTesseractOCR(
                 imagePath: imagePath,
                 language: language,
-                tessData: tessData,
-                config: rawConfig,
+                engineMode: (engine?.lowercased() == "lstm") ? .lstmOnly : .tesseractOnly,
+                config: config,
                 result: result
             )
-        }
-        #elseif canImport(SwiftyTesseract)
-        if useVision {
+            #else
             result(FlutterError(
-                code: "UNSUPPORTED_ENGINE",
-                message: "Apple Vision engine is only supported on iOS. Use OCREngine.tesseract or OCREngine.defaultEngine on this platform.",
+                code: "NOT_SUPPORTED",
+                message: "Tesseract OCR is not available on this platform",
                 details: nil
             ))
-            return
+            #endif
+        default:
+            // `defaultEngine` and any absent engine: the platform default.
+            #if canImport(UIKit)
+            performVisionOCR(imagePath: imagePath, language: language, result: result)
+            #elseif canImport(SwiftyTesseract)
+            performTesseractOCR(
+                imagePath: imagePath,
+                language: language,
+                engineMode: .default,
+                config: config,
+                result: result
+            )
+            #else
+            result(FlutterError(
+                code: "NOT_SUPPORTED",
+                message: "Tesseract OCR is not available on this platform",
+                details: nil
+            ))
+            #endif
         }
-        performTesseractOCR(
-            imagePath: imagePath,
-            language: language,
-            tessData: tessData,
-            config: rawConfig,
-            result: result
-        )
-        #else
-        result(FlutterError(
-            code: "NOT_SUPPORTED",
-            message: "Tesseract OCR is not available on this platform",
-            details: nil
-        ))
-        #endif
     }
 
-    #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
+    // MARK: - Apple Vision (iOS)
+
+    #if canImport(UIKit)
     private func performVisionOCR(
         imagePath: String,
         language: String,
@@ -131,129 +138,59 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-        let request = VNRecognizeTextRequest { (request, error) in
-            // The completion runs on Vision's own queue; reply on the main queue
-            // like every other path. `self` is not needed here, so there is no
-            // weak capture that could drop the reply if the plugin deallocates.
-            if let error = error {
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "OCR_ERROR",
-                        message: "Vision OCR failed: \(error.localizedDescription)",
-                        details: nil
-                    ))
-                }
-                return
-            }
-
-            guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                DispatchQueue.main.async {
-                    result(FlutterError(
-                        code: "OCR_NO_RESULTS",
-                        message: "No text observations found",
-                        details: nil
-                    ))
-                }
-                return
-            }
-
-            let recognizedStrings = observations.compactMap { observation in
-                observation.topCandidates(1).first?.string
-            }
-            let text = recognizedStrings.joined(separator: "\n")
-            DispatchQueue.main.async {
-                result(text)
-            }
-        }
-
+        let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         if #available(iOS 16.0, *) {
             request.automaticallyDetectsLanguage = true
         } else {
-            request.recognitionLanguages = ["en-US"]
-            if language.lowercased().contains("fra") {
-                request.recognitionLanguages = ["fr-FR"]
-            } else if language.lowercased().contains("deu") {
-                request.recognitionLanguages = ["de-DE"]
-            } else if language.lowercased().contains("spa") {
-                request.recognitionLanguages = ["es-ES"]
-            }
+            request.recognitionLanguages = Self.visionLanguages(for: language)
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        // Vision is blocking and CPU-bound: keep it off the main thread.
+        DispatchQueue(label: "com.tesseract.vision", qos: .userInitiated).async {
+            let handler = VNImageRequestHandler(cgImage: cgImage)
             do {
-                try requestHandler.perform([request])
+                try handler.perform([request])
             } catch {
                 DispatchQueue.main.async {
                     result(FlutterError(
                         code: "OCR_PROCESS_ERROR",
-                        message: "Failed to perform Vision OCR: \(error.localizedDescription)",
+                        message: "Apple Vision OCR failed: \(error.localizedDescription)",
                         details: nil
                     ))
                 }
+                return
+            }
+
+            let observations = request.results ?? []
+            let text = observations
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n")
+
+            DispatchQueue.main.async {
+                result(text)
             }
         }
+    }
+
+    /// Maps a Tesseract language code onto a Vision recognition language.
+    private static func visionLanguages(for language: String) -> [String] {
+        let code = language.lowercased()
+        if code.contains("fra") { return ["fr-FR"] }
+        if code.contains("deu") { return ["de-DE"] }
+        if code.contains("spa") { return ["es-ES"] }
+        if code.contains("tur") { return ["tr-TR"] }
+        return ["en-US"]
     }
     #endif
 
+    // MARK: - Tesseract (SwiftyTesseract)
+
     #if canImport(SwiftyTesseract)
-    private func validateTessData(
-        language: String,
-        tessData: String?,
-        fileManager: FileManager = .default
-    ) -> (directoryPath: String, trainedDataFiles: [String])? {
-        let languageParts = language
-            .split(separator: "+")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard !languageParts.isEmpty else { return nil }
-
-        // Flutter bundles assets under `flutter_assets` inside the app/framework
-        // bundle, so the Dart-provided `tessData` path is the only candidate that
-        // reliably resolves on iOS and macOS. `Bundle.main.resourceURL/tessdata`
-        // and `.../flutter_assets/assets/tessdata` never exist in a real Flutter
-        // app, so they are not worth probing.
-        var candidates: [String] = []
-        if let tessData = tessData?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !tessData.isEmpty {
-            candidates.append(tessData)
-            candidates.append((tessData as NSString).appendingPathComponent("tessdata"))
-        }
-
-        for candidate in candidates where !candidate.isEmpty {
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: candidate, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                continue
-            }
-
-            var foundFiles: [String] = []
-            var allPresent = true
-            for part in languageParts {
-                let fileName = "\(part).traineddata"
-                let filePath = (candidate as NSString).appendingPathComponent(fileName)
-                if fileManager.fileExists(atPath: filePath) {
-                    foundFiles.append(fileName)
-                } else {
-                    allPresent = false
-                    break
-                }
-            }
-
-            if allPresent {
-                return (candidate, foundFiles)
-            }
-        }
-
-        return nil
-    }
-
     private func performTesseractOCR(
         imagePath: String,
         language: String,
-        tessData: String?,
+        engineMode: EngineMode,
         config: [String: Any]?,
         result: @escaping FlutterResult
     ) {
@@ -278,57 +215,37 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        // Preflight tessdata directory and traineddata files so we never hit
-        // SwiftyTesseract's fatalError on physical devices.
-        guard let validatedTessData = validateTessData(language: language, tessData: tessData) else {
-            let languageParts = language
-                .split(separator: "+")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            let basePathDescription = (tessData?.isEmpty == false) ? tessData! : "tessdata (provided by the app)"
-            let missingFiles = languageParts
-                .map { "\($0).traineddata" }
-                .joined(separator: ", ")
-            result(FlutterError(
-                code: "TESSDATA_NOT_FOUND",
-                message: "Missing or unreadable traineddata file(s) [\(missingFiles)] in tessdata directory at '\(basePathDescription)'. Ensure .traineddata files are listed in assets/tessdata_config.json and bundled in assets/tessdata/.",
-                details: nil
-            ))
-            return
-        }
-
-        // Determine engine mode. SwiftyTesseract 4.0.1 defines `EngineMode` as a
-        // typealias of `TessOcrEngineMode` with members: tesseractOnly, lstmOnly,
-        // tesseractLstmCombined, default (no `defaultEngine`).
-        let engineMode: EngineMode
-        if let engineStr = config?["engine"] as? String {
-            switch engineStr.lowercased() {
-            case "tesseract":
-                engineMode = .tesseractOnly
-            case "vision":
-                #if canImport(UIKit) && !os(macOS)
-                engineMode = .lstmOnly
-                #else
+        // Configure Tesseract. The language argument is `+`-separated ISO
+        // 639-3 codes; SwiftyTesseract models these as a fixed enum, so each
+        // code is resolved through the generated table below.
+        let languageCodes = language.split(separator: "+").map { String($0) }
+        var recognitionLanguages: [RecognitionLanguage] = []
+        for code in languageCodes {
+            guard let resolved = Self.recognitionLanguage(for: code) else {
                 result(FlutterError(
-                    code: "UNSUPPORTED_ENGINE",
-                    message: "Vision engine is only supported on iOS",
+                    code: "INVALID_LANGUAGE",
+                    message: "Unknown Tesseract language code \(code)",
                     details: nil
                 ))
                 return
-                #endif
-            default:
-                engineMode = .default
             }
-        } else {
-            engineMode = .lstmOnly
+            recognitionLanguages.append(resolved)
+        }
+        if recognitionLanguages.isEmpty {
+            recognitionLanguages = [.english]
         }
 
-        // Perform OCR on a serial queue to prevent race conditions.
-        //
-        // The Tesseract handle is created, initialized, used, ended and deleted
-        // ALL inside this dispatched closure: a `defer` at function scope would
-        // run as soon as the outer function returned, deleting the handle before
-        // the async block touches it (use-after-free).
+        let tesseract = Tesseract(
+            languages: recognitionLanguages,
+            engineMode: engineMode
+        ) { tessBaseAPI in
+            guard let options = config?["options"] as? [String: String] else { return }
+            for (key, value) in options where Tesseract.Variable(rawValue: key) != nil {
+                TessBaseAPISetVariable(tessBaseAPI, key, value)
+            }
+        }
+
+        // Perform OCR on a serial queue to prevent race conditions
         DispatchQueue(label: "com.tesseract.ocr", qos: .userInitiated).async {
             // The timeout and the OCR completion can race: without this guard
             // `result` would be called twice (once by whichever finishes first,
@@ -345,52 +262,6 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-            // Create Tesseract instance against the validated tessdata path via TessBaseAPI
-            guard let tessBaseAPI = TessBaseAPICreate() else {
-                completeOnce(FlutterError(
-                    code: "OCR_INIT_FAILED",
-                    message: "Failed to create Tesseract API instance.",
-                    details: nil
-                ))
-                return
-            }
-            defer {
-                TessBaseAPIEnd(tessBaseAPI)
-                TessBaseAPIDelete(tessBaseAPI)
-            }
-
-            let initReturnCode = TessBaseAPIInit2(
-                tessBaseAPI,
-                validatedTessData.directoryPath,
-                language,
-                engineMode
-            )
-            guard initReturnCode == 0 else {
-                completeOnce(FlutterError(
-                    code: "OCR_INIT_FAILED",
-                    message: "Failed to initialize Tesseract with language '\(language)' at '\(validatedTessData.directoryPath)' (code: \(initReturnCode)). Ensure \(validatedTessData.trainedDataFiles.joined(separator: ", ")) matches the selected engine mode.",
-                    details: nil
-                ))
-                return
-            }
-
-            if let options = config?["options"] as? [String: Any] {
-                for (key, value) in options {
-                    let strValue: String
-                    if let s = value as? String {
-                        strValue = s
-                    } else if let b = value as? Bool {
-                        strValue = b ? "1" : "0"
-                    } else if let n = value as? NSNumber {
-                        strValue = n.stringValue
-                    } else {
-                        strValue = "\(value)"
-                    }
-                    TessBaseAPISetVariable(tessBaseAPI, key, strValue)
-                }
-            }
-
-            // Set up timeout
             let timeoutWorkItem = DispatchWorkItem {
                 completeOnce(FlutterError(
                     code: "OCR_TIMEOUT",
@@ -401,55 +272,139 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 30.0, execute: timeoutWorkItem)
 
-            // Perform OCR
-            //
-            // `withUnsafeBytes` hands over an `UnsafeRawBufferPointer` whose
-            // base address is an `UnsafeRawPointer?`; `pixReadMem` wants an
-            // `UnsafePointer<UInt8>`, so bind the memory explicitly to UInt8.
-            // pixReadMem copies the bytes, so the buffer is only needed for the
-            // duration of this call.
-            let pix = imageData.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> OpaquePointer? in
-                guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-                    return nil
-                }
-                return pixReadMem(base, imageData.count)
-            }
-            guard let pix = pix else {
-                timeoutWorkItem.cancel()
-                completeOnce(FlutterError(
-                    code: "OCR_PROCESS_ERROR",
-                    message: "Failed to decode image data for OCR.",
-                    details: nil
-                ))
-                return
-            }
-            defer {
-                pixDestroy(pix)
-            }
-
-            TessBaseAPISetImage2(tessBaseAPI, pix)
-            if TessBaseAPIGetSourceYResolution(tessBaseAPI) < 70 {
-                TessBaseAPISetSourceResolution(tessBaseAPI, 300)
-            }
-
-            let recognized = TessBaseAPIRecognize(tessBaseAPI, nil) == 0
+            let ocrResult = tesseract.performOCR(on: imageData)
             timeoutWorkItem.cancel()
 
-            guard recognized, let textPtr = TessBaseAPIGetUTF8Text(tessBaseAPI) else {
+            switch ocrResult {
+            case .success(let recognizedText):
+                completeOnce(recognizedText)
+            case .failure(let error):
                 completeOnce(FlutterError(
                     code: "OCR_PROCESS_ERROR",
-                    message: "Tesseract OCR failed to extract text from image.",
+                    message: "Tesseract OCR failed: \(error.localizedDescription)",
                     details: nil
                 ))
-                return
             }
-            defer {
-                TessDeleteText(textPtr)
-            }
-
-            let recognizedText = String(cString: textPtr)
-            completeOnce(recognizedText)
         }
     }
     #endif
+}
+
+// MARK: - RecognitionLanguage lookup
+
+extension SwiftTesseractOcrPlugin {
+    /// Maps a Tesseract language code (ISO 639-3, e.g. `eng`, `tur`) onto a
+    /// [RecognitionLanguage].
+    ///
+    /// SwiftyTesseract 4.0.1 models languages as a fixed enum with no string
+    /// initialiser and no `CaseIterable` conformance, so the code → case table
+    /// is spelled out. It is generated from the enum's own `description`
+    /// switch, so it stays complete as long as this table is regenerated with
+    /// the dependency.
+    static func recognitionLanguage(for code: String) -> RecognitionLanguage? {
+        switch code.lowercased() {
+        case "afr": return .afrikaans
+        case "sqi": return .albanian
+        case "amh": return .amharic
+        case "ara": return .arabic
+        case "asm": return .assamese
+        case "aze": return .azerbaijani
+        case "aze_cyrl": return .azerbaijaniCyrillic
+        case "eus": return .basque
+        case "bel": return .belarusian
+        case "ben": return .bengali
+        case "bos": return .bosnian
+        case "bul": return .bulgarian
+        case "mya": return .burmese
+        case "cat": return .catalanAndValencian
+        case "ceb": return .cebuano
+        case "khm": return .centralKhmer
+        case "chr": return .cherokee
+        case "chi_sim": return .chineseSimplified
+        case "chi_tra": return .chineseTraditional
+        case "hrv": return .croatian
+        case "ces": return .czech
+        case "dan": return .danish
+        case "nld": return .dutchFlemish
+        case "dzo": return .dzongkha
+        case "eng": return .english
+        case "enm": return .englishMiddle
+        case "epo": return .esperanto
+        case "est": return .estonian
+        case "fin": return .finnish
+        case "frk": return .frankish
+        case "fra": return .french
+        case "frm": return .frenchMiddle
+        case "glg": return .galician
+        case "kat": return .georgian
+        case "kat_old": return .georgianOld
+        case "deu": return .german
+        case "grc": return .greekAncient
+        case "ell": return .greekModern
+        case "guj": return .guajarati
+        case "hat": return .haitian
+        case "heb": return .hebrew
+        case "hin": return .hindi
+        case "hun": return .hungarian
+        case "isl": return .icelandic
+        case "ind": return .indonesian
+        case "iku": return .inuktitut
+        case "gle": return .irish
+        case "ita": return .italian
+        case "ita_old": return .italianOld
+        case "jpn": return .japanese
+        case "jav": return .javanese
+        case "kan": return .kannada
+        case "kaz": return .kazakh
+        case "kor": return .korean
+        case "kur": return .kurdish
+        case "kir": return .kyrgyz
+        case "lao": return .lao
+        case "lat": return .latin
+        case "lit": return .lithuanian
+        case "mkd": return .macedonian
+        case "msa": return .malay
+        case "mal": return .malayalam
+        case "mlt": return .maltese
+        case "mar": return .marathi
+        case "nep": return .nepali
+        case "nor": return .norwegian
+        case "ori": return .oriya
+        case "pus": return .pashto
+        case "fas": return .persian
+        case "pol": return .polish
+        case "por": return .portugese
+        case "pan": return .punjabi
+        case "ron": return .romanian
+        case "rus": return .russian
+        case "san": return .sanskrit
+        case "srp": return .serbian
+        case "srp_ltn": return .serbianLatin
+        case "sin": return .sinhala
+        case "slk": return .slovak
+        case "slv": return .slovenian
+        case "spa": return .spanish
+        case "spa_old": return .spanishOld
+        case "swa": return .swahili
+        case "swe": return .swedish
+        case "syr": return .syriac
+        case "tgl": return .tagalog
+        case "tgk": return .tajik
+        case "tam": return .tamil
+        case "tel": return .telugu
+        case "tha": return .thai
+        case "bod": return .tibetan
+        case "tir": return .tigrinya
+        case "tur": return .turkish
+        case "uig": return .uighur
+        case "ukr": return .ukrainian
+        case "urd": return .urdu
+        case "uzb": return .uzbek
+        case "uzb_cyrl": return .uzbekCyrillic
+        case "vie": return .vietnamese
+        case "cym": return .welsh
+        case "yid": return .yiddish
+        default: return nil
+        }
+    }
 }
