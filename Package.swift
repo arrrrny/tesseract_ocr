@@ -3,43 +3,13 @@
 
 import PackageDescription
 
-// NOTE: this conditional is evaluated on the machine running `swift build`
-// (the host), not on the target platform. That is fine for Flutter plugins —
-// each platform builds natively, so a macOS build always takes the #else
-// (Apple) branch and a Linux build always takes the Linux branch. It does mean
-// the manifest cannot cross-compile: an Apple-host build cannot produce a Linux
-// binary, and vice versa.
-#if os(Linux)
-// Linux configuration: uses system tesseract via C++ interop
-let package = Package(
-    name: "tesseract_ocr",
-    platforms: [.iOS(.v11), .macOS(.v10_13)],
-    products: [
-        .library(
-            name: "tesseract-ocr",
-            targets: ["tesseract_ocr"]
-        )
-    ],
-    dependencies: [],
-    targets: [
-        .target(
-            name: "tesseract_ocr",
-            dependencies: ["TesseractOcrCpp"],
-            path: "Sources/tesseract_ocr"
-        ),
-        .systemLibrary(
-            name: "TesseractOcrCpp",
-            path: "Sources/TesseractOcrCpp",
-            pkgConfig: "tesseract",
-            providers: [
-                .apt(["libtesseract-dev", "libleptonica-dev"]),
-                .yum(["tesseract-devel", "leptonica-devel"]),
-            ]
-        )
-    ]
-)
-#else
-// Apple platforms: uses SwiftyTesseract via SPM
+// Apple platforms only (iOS, macOS).
+//
+// Flutter builds Linux plugins with CMake (see the top-level linux/ directory),
+// not Swift Package Manager, so this manifest intentionally targets Apple. An
+// earlier `#if os(Linux)` branch compiled a Swift Linux plugin, but that path is
+// unused by Flutter and redeclared SwiftTesseractOcrPlugin, which broke
+// `swift build` on Linux; Linux support lives entirely in linux/.
 let package = Package(
     name: "tesseract_ocr",
     platforms: [.iOS(.v11), .macOS(.v10_13)],
@@ -62,4 +32,3 @@ let package = Package(
         )
     ]
 )
-#endif
