@@ -9,12 +9,12 @@ enum OCREngine {
   /// Apple Vision OCR engine (iOS only)
   vision,
 
-  /// Tesseract OCR engine (iOS, Android, and macOS)
+  /// Tesseract OCR engine (iOS, Android, macOS, and Web)
   tesseract,
 
   /// Default engine - platform specific
   /// On iOS: Vision
-  /// On Android and macOS: Tesseract
+  /// On Android, macOS, and Web: Tesseract
   defaultEngine,
 }
 

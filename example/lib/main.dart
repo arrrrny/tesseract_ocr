@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
@@ -122,10 +123,12 @@ class _MyAppState extends State<MyApp> {
 
                         try {
                           print('DEBUG: Starting OCR on image: ${image.path}');
+                          if (!kIsWeb) {
+                            print(
+                                'DEBUG: Image exists: ${await File(image.path).exists()}');
+                          }
                           print(
-                              'DEBUG: Image exists: ${await File(image.path).exists()}');
-                          print(
-                              'DEBUG: Image size: ${await File(image.path).length()} bytes');
+                              'DEBUG: Image size: ${await image.length()} bytes');
 
                           // Get tesseract language (used for Tesseract engine)
                           const language =
@@ -217,10 +220,15 @@ class _MyAppState extends State<MyApp> {
                   Container(
                     height: 300,
                     child: Center(
-                      child: Image.file(
-                        File(_selectedImage!.path),
-                        fit: BoxFit.contain,
-                      ),
+                      child: kIsWeb
+                          ? Image.network(
+                              _selectedImage!.path,
+                              fit: BoxFit.contain,
+                            )
+                          : Image.file(
+                              File(_selectedImage!.path),
+                              fit: BoxFit.contain,
+                            ),
                     ),
                   ),
               ],
