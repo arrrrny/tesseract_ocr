@@ -3,6 +3,8 @@ import UIKit
 import Vision
 
 public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
+    private let ocrQueue = DispatchQueue(label: "com.tesseract.ocr", qos: .userInitiated)
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "tesseract_ocr", binaryMessenger: registrar.messenger())
         let instance = SwiftTesseractOcrPlugin()
@@ -42,53 +44,72 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 return
             }
             
-            // Create a new image-request handler.
-            let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-            
-            // Create a new request to recognize text.
-            let request = VNRecognizeTextRequest { (request, error) in
-                guard error == nil else {
-                    result(FlutterError(code: "OCR_ERROR", message: "Vision OCR failed: \(error!.localizedDescription)", details: nil))
-                    return
+            // `handle` runs on the platform thread, so the recognition itself is
+            // dispatched: VNRecognizeTextRequest at .accurate blocks for the whole
+            // recognition and would freeze the UI.
+            ocrQueue.async {
+                // The request completion and a thrown error can both answer, and a
+                // second FlutterResult call crashes the app.
+                let resultLock = NSLock()
+                var didComplete = false
+                let completeOnce: (Any?) -> Void = { value in
+                    resultLock.lock()
+                    defer { resultLock.unlock() }
+                    guard !didComplete else { return }
+                    didComplete = true
+                    DispatchQueue.main.async {
+                        result(value)
+                    }
                 }
                 
-                guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                    result(FlutterError(code: "OCR_NO_RESULTS", message: "No text observations found", details: nil))
-                    return
+                // Create a new image-request handler.
+                let requestHandler = VNImageRequestHandler(cgImage: cgImage)
+                
+                // Create a new request to recognize text.
+                let request = VNRecognizeTextRequest { (request, error) in
+                    guard error == nil else {
+                        completeOnce(FlutterError(code: "OCR_ERROR", message: "Vision OCR failed: \(error!.localizedDescription)", details: nil))
+                        return
+                    }
+                    
+                    guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                        completeOnce(FlutterError(code: "OCR_NO_RESULTS", message: "No text observations found", details: nil))
+                        return
+                    }
+                    
+                    let recognizedStrings = observations.compactMap { observation in
+                        // Return the string of the top candidate
+                        observation.topCandidates(1).first?.string
+                    }
+                    
+                    let text = recognizedStrings.joined(separator: "\n")
+                    print("OCR complete, found \(observations.count) text observations")
+                    completeOnce(text)
                 }
                 
-                let recognizedStrings = observations.compactMap { observation in
-                    // Return the string of the top candidate
-                    observation.topCandidates(1).first?.string
+                // Set recognition level
+                request.recognitionLevel = .accurate
+                
+                // Set language correction to not use it
+                if #available(iOS 16.0, *) {
+                    request.automaticallyDetectsLanguage = true
+                } else {
+                    request.recognitionLanguages = ["en-US"]
+                    if languageString.lowercased().contains("fra") {
+                        request.recognitionLanguages = ["fr-FR"]
+                    } else if languageString.lowercased().contains("deu") {
+                        request.recognitionLanguages = ["de-DE"]
+                    } else if languageString.lowercased().contains("spa") {
+                        request.recognitionLanguages = ["es-ES"]
+                    }
                 }
                 
-                let text = recognizedStrings.joined(separator: "\n")
-                print("OCR complete, found \(observations.count) text observations")
-                result(text)
-            }
-            
-            // Set recognition level
-            request.recognitionLevel = .accurate
-            
-            // Set language correction to not use it
-            if #available(iOS 16.0, *) {
-                request.automaticallyDetectsLanguage = true
-            } else {
-                request.recognitionLanguages = ["en-US"]
-                if languageString.lowercased().contains("fra") {
-                    request.recognitionLanguages = ["fr-FR"]
-                } else if languageString.lowercased().contains("deu") {
-                    request.recognitionLanguages = ["de-DE"]
-                } else if languageString.lowercased().contains("spa") {
-                    request.recognitionLanguages = ["es-ES"]
+                do {
+                    // Perform the text-recognition request.
+                    try requestHandler.perform([request])
+                } catch {
+                    completeOnce(FlutterError(code: "OCR_PROCESS_ERROR", message: "Failed to perform OCR: \(error.localizedDescription)", details: nil))
                 }
-            }
-            
-            do {
-                // Perform the text-recognition request.
-                try requestHandler.perform([request])
-            } catch {
-                result(FlutterError(code: "OCR_PROCESS_ERROR", message: "Failed to perform OCR: \(error.localizedDescription)", details: nil))
             }
         } else {
             result(FlutterMethodNotImplemented)
