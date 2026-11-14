@@ -76,6 +76,91 @@ void main() {
     );
   });
 
+  test('pubspec.yaml registers ios as a supported plugin platform', () async {
+    final pubspec = await File('pubspec.yaml').readAsString();
+    expect(pubspec, contains('ios:'));
+    expect(
+      pubspec,
+      matches(RegExp(r'ios:\s*\n\s*pluginClass:\s*TesseractOcrPlugin')),
+    );
+  });
+
+  test('pubspec.yaml declares sharedDarwinSource for the shared Apple source',
+      () async {
+    final pubspec = await File('pubspec.yaml').readAsString();
+    expect(
+      pubspec,
+      matches(
+        RegExp(
+          r'macos:\s*\n\s*pluginClass:\s*TesseractOcrPlugin\s*\n\s*sharedDarwinSource:\s*true',
+        ),
+      ),
+    );
+  });
+
+  test('Package.swift declares SwiftyTesseract dependency for Apple platforms',
+      () async {
+    final packageSwift = await File('Package.swift').readAsString();
+    expect(packageSwift, contains('https://github.com/SwiftyTesseract/SwiftyTesseract.git'));
+    expect(packageSwift, contains('.product(name: "SwiftyTesseract", package: "SwiftyTesseract")'));
+  });
+
+  test('iOS Swift plugin validates tessData directory and traineddata files before initializing Tesseract',
+      () async {
+    final swiftSource = await File('Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift').readAsString();
+    expect(
+      swiftSource,
+      contains('func validateTessData'),
+    );
+    expect(
+      swiftSource,
+      contains('TESSDATA_NOT_FOUND'),
+    );
+  });
+
+  // These guards pin the review-fix invariants in the Swift source itself, so a
+  // regression that reintroduces a blocker (a non-compiling enum case, a
+  // use-after-free defer, a dead binding) fails a test rather than only a real
+  // `swift build` on macOS. They are not a substitute for that build gate
+  // (.github/workflows/ci.yml), but they catch the regressions this PR is about.
+  group('iOS Swift plugin source invariants', () {
+    late String swiftSource;
+
+    setUp(() async {
+      swiftSource = await File(
+        'Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift',
+      ).readAsString();
+    });
+
+    test('uses the real EngineMode case (.default), not a non-existent .defaultEngine', () {
+      expect(swiftSource, isNot(contains('engineMode = .defaultEngine')));
+      expect(swiftSource, contains('engineMode = .default'));
+    });
+
+    test('creates and releases the TessBaseAPI handle inside the dispatched OCR closure', () {
+      // The create/defer must live inside the DispatchQueue.async block, not at
+      // function scope (which would end the handle before the async OCR runs).
+      final asyncBlock = swiftSource.substring(
+        swiftSource.indexOf('DispatchQueue(label: "com.tesseract.ocr"'),
+      );
+      expect(asyncBlock, contains('TessBaseAPICreate()'));
+      expect(asyncBlock, contains('TessBaseAPIEnd(tessBaseAPI)'));
+      expect(asyncBlock, contains('TessBaseAPIDelete(tessBaseAPI)'));
+    });
+
+    test('does not depend on OCREngineConfig (not in scope under SPM)', () {
+      expect(swiftSource, isNot(contains('OCREngineConfig')));
+    });
+
+    test('does not keep the unused languageCodes binding', () {
+      expect(swiftSource, isNot(contains('let languageCodes')));
+    });
+
+    test('pixReadMem receives an explicitly-bound UnsafePointer<UInt8>', () {
+      expect(swiftSource, contains('assumingMemoryBound(to: UInt8.self)'));
+    });
+  });
+
   test('extractText throws ArgumentError on IO when image file is missing',
       () async {
     final missingPath = '${tempDir.path}/does_not_exist.png';
