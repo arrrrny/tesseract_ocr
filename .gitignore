@@ -7,3 +7,5 @@
 
 build/
 android/.idea/
+.vscode
+example/.flutter-plugins-dependencies

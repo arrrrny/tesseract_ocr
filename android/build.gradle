@@ -1,44 +1,36 @@
 group 'io.paratoner.tesseract_ocr'
 version '1.0'
 
-buildscript {
-    repositories {
-        mavenLocal()
-        google()
-        jcenter()
-        maven { url 'https://jitpack.io' }
-    }
-
-    dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.1'
-    }
-}
-
 rootProject.allprojects {
     repositories {
-        mavenLocal()
-        google()
-        jcenter()
-        maven { url 'https://jitpack.io' }
+        maven {
+            url 'https://jitpack.io'
+            content {
+                includeGroup 'cz.adaptech.tesseract4android'
+            }
+        }
     }
 }
 
 apply plugin: 'com.android.library'
 
 android {
-    namespace 'io.paratoner.tesseract_ocr'
-    compileSdkVersion 35
+    namespace = 'io.paratoner.tesseract_ocr'
+    compileSdk = 35
 
     defaultConfig {
-        minSdkVersion 16
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        minSdk = 16
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    lintOptions {
-        disable 'InvalidPackage'
+
+    lint {
+        disable += 'InvalidPackage'
     }
-    packagingOptions{
-        doNotStrip '*/mips/*.so'
-        doNotStrip '*/mips64/*.so'
+
+    packaging {
+        jniLibs {
+            keepDebugSymbols += ['*/mips/*.so', '*/mips64/*.so']
+        }
     }
 }
 
