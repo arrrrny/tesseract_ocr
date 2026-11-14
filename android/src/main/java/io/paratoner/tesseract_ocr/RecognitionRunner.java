@@ -203,10 +203,10 @@ class RecognitionRunner {
             }
 
             // The caller's options sit between init and the image: the PSM is
-            // part of how the engine was configured, and a failure to apply one
-            // must be the caller's error, not a failed recognition. A native
-            // bridge can fail with an Error here as well as an Exception, which
-            // is what the catch below is for.
+            // part of how the engine was configured. A throw from the engine
+            // here — an Exception or, from a native bridge, an Error — is
+            // contained by the catch below and reported as a recognition
+            // error; it never reaches the host process.
             baseApi.applyOptions(options.pageSegMode(), options.variables());
             baseApi.setImage(image);
             final String recognizedText = hocr

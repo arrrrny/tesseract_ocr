@@ -160,8 +160,12 @@ public class RecognitionRunnerTest {
     }
 
     @Test
-    public void anOptionTheEngineRefusesIsReportedRatherThanCrashing() {
-        api.optionsFailure = new IllegalStateException("unknown variable");
+    public void anEngineThrowWhileApplyingOptionsIsReportedRatherThanCrashing() {
+        // An unrecognised variable never gets here — setVariable returns false
+        // for one — so this pins the runner's containment of an unexpected
+        // throw from the engine during applyOptions (a native bridge can fail
+        // with an Error here as well as an Exception).
+        api.optionsFailure = new IllegalStateException("engine threw");
 
         runner.recognize(
             TESS_DATA,
@@ -173,7 +177,7 @@ public class RecognitionRunnerTest {
         );
 
         assertEquals("RECOGNITION_ERROR", reply.awaitError());
-        assertTrue(reply.lastErrorMessage().contains("unknown variable"));
+        assertTrue(reply.lastErrorMessage().contains("engine threw"));
         assertEquals(1, api.recycleCount());
         assertEquals(0, api.imageCount());
     }

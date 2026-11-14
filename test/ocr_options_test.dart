@@ -215,10 +215,29 @@ void main() {
     test('the Vision option keys are the ones the iOS plugin resolves',
         () async {
       final ios = await File(
-        'ios/Classes/SwiftTesseractOcrPlugin.swift',
+        // Master moved the iOS plugin into the Swift package layout
+        // (Sources/tesseract_ocr/) when it dropped ios/Classes/.
+        'Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift',
       ).readAsString();
       expect(ios, contains('case "$recognitionLevelKey"'));
       expect(ios, contains('case "$usesLanguageCorrectionKey"'));
+    });
+
+    test("the Android reserved keys match the Java plugin's literals",
+        () async {
+      // OcrOptions.java spells RESERVED_KEYS as literals while the Dart side
+      // uses TesseractConfig constants; a rename here must not silently turn a
+      // reserved key into a forwarded Tesseract variable on Android.
+      final java = await File(
+        'android/src/main/java/io/paratoner/tesseract_ocr/OcrOptions.java',
+      ).readAsString();
+      for (final key in OcrOptionSpec.androidReservedKeys) {
+        expect(
+          java,
+          contains('"$key"'),
+          reason: 'Android OcrOptions.java must reserve $key',
+        );
+      }
     });
   });
 

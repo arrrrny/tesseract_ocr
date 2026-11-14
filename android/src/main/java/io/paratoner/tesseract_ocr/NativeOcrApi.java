@@ -23,8 +23,12 @@ interface NativeOcrApi {
      * would be meaningless as a Tesseract variable, and passing it that way is
      * how it used to be dropped.
      *
-     * <p>Implementations must not throw for an option the engine refuses — an
-     * unrecognised variable is the caller's mistake, not a failed recognition.
+     * <p>An option the engine does not know is not a failure and must not
+     * throw: {@code setVariable} returns false for an unrecognised variable and
+     * the implementation moves on, because the caller's spelling is their
+     * mistake, not a failed recognition. A throw the engine raises despite that
+     * is contained one level up — {@link RecognitionRunner} reports it as a
+     * recognition error instead of letting it reach the host process.
      *
      * @param pageSegMode the PSM to apply, or {@code null} to keep the engine's
      *     own default

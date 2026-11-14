@@ -178,9 +178,11 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
         public void applyOptions(Integer pageSegMode, Map<String, String> variables) {
             final TessBaseAPI handle = require();
             if (pageSegMode != null) {
-                // OcrOptions already bounded the value to the PSM range, so this
-                // lookup cannot throw for a caller's out-of-range input.
-                handle.setPageSegMode(TessBaseAPI.PageSegMode.values()[pageSegMode]);
+                // PageSegMode's constants ARE the tesseract PSM integers
+                // (PSM_RAW_LINE == 13) and setPageSegMode takes the int, so the
+                // value OcrOptions bounded to 0..13 passes straight through —
+                // no enum lookup whose ordinal order could drift.
+                handle.setPageSegMode(pageSegMode);
             }
             for (Map.Entry<String, String> variable : variables.entrySet()) {
                 // An unknown variable is the caller's spelling, not a failed
