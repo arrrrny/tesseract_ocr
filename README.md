@@ -183,7 +183,7 @@ For existing projects using CocoaPods, the legacy setup is still available but r
     └── ... (other iOS files)
     ```
 
-3.  **Configure Your App's Podfile**: In your Flutter app's `ios/Podfile`, you need to reference the custom podspecs provided within the `tesseract_ocr` plugin using the `:path` option.
+3.  **Configure Your App's Podfile**: In your Flutter app's `ios/Podfile`, you need to reference the custom podspecs provided within the `tesseract_ocr` plugin: `SwiftyTesseract401` by `:podspec`, `libtesseract` by `:path`. No `EXCLUDED_ARCHS` entry is needed — the arm64 Apple Silicon simulator slice builds on its own.
 
     Locate your `target 'Runner'` block and add the following lines:
 
@@ -202,7 +202,7 @@ For existing projects using CocoaPods, the legacy setup is still available but r
       # Add the custom SwiftyTesseract401 and libtesseract pods
       # These paths are relative from YOUR app's ios directory to the plugin's ios directory
       # Adjust the '../../.symlinks/plugins/tesseract_ocr/ios' path if necessary
-      pod 'SwiftyTesseract401', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
+      pod 'SwiftyTesseract401', :podspec => '../../.symlinks/plugins/tesseract_ocr/ios/SwiftyTesseract401.podspec'
       pod 'libtesseract', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
 
 

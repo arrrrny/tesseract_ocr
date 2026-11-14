@@ -3,7 +3,8 @@ platform :ios, '14.0'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
-pod 'SwiftyTesseract401', :path => '../../ios'
+pod 'SwiftyTesseract401', :podspec => '../../ios/SwiftyTesseract401.podspec'
+pod 'libtesseract', :path => '../../ios'
 
 project 'Runner', {
   'Debug' => :debug,
@@ -43,9 +44,6 @@ post_install do |installer|
     target.build_configurations.each do |config|
       config.build_settings['ENABLE_BITCODE'] = 'NO'
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-
-      # Workaround for arm64 issue in Xcode 15
-      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386 arm64'
 
       # Add App Store Connect submission fix for libtesseract
       if target.name.include?("SwiftyTesseract") || target.name.include?("libtesseract")

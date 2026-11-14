@@ -29,7 +29,7 @@ This custom setup involves:
 
 ## Configure Your Podfile
 
-In your Flutter app's `ios/Podfile`, you need to reference the custom `SwiftyTesseract401.podspec` and `libtesseract.podspec` provided by the `tesseract_ocr` plugin using the `:path` option.
+In your Flutter app's `ios/Podfile`, you need to reference the custom `SwiftyTesseract401.podspec` and `libtesseract.podspec` provided by the `tesseract_ocr` plugin. `SwiftyTesseract401` is referenced by `:podspec` (CocoaPods fetches the upstream 4.0.1 sources named by the podspec's `source`); `libtesseract` is referenced by `:path`.
 
 Locate your `target 'Runner'` block and add the following lines:
 
@@ -49,7 +49,7 @@ target 'Runner' do
   # Add the custom SwiftyTesseract401 and libtesseract pods
   # These paths are relative from YOUR app's ios directory to the plugin's ios directory
   # Adjust the '../../.symlinks/plugins/tesseract_ocr/ios' path if necessary
-  pod 'SwiftyTesseract401', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
+  pod 'SwiftyTesseract401', :podspec => '../../.symlinks/plugins/tesseract_ocr/ios/SwiftyTesseract401.podspec'
   pod 'libtesseract', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
 
 
@@ -60,7 +60,9 @@ end
 # ... other Podfile content (e.g., post_install hook) ...
 ```
 
-**Note:** The `:path` value `../../.symlinks/plugins/tesseract_ocr/ios` is the standard path from your app's `ios` directory to a plugin's `ios` directory when using Flutter. If your project structure is different, you may need to adjust this path.
+**Note:** The `../../.symlinks/plugins/tesseract_ocr/ios` path is the standard path from your app's `ios` directory to a plugin's `ios` directory when using Flutter. If your project structure is different, you may need to adjust this path.
+
+No `EXCLUDED_ARCHS` entry is needed: the CocoaPods path builds the arm64 Apple Silicon simulator slice on its own. Do not add one — excluding `arm64` for the simulator only hides the arm64 module this setup is supposed to provide.
 
 ## Install Pods
 
