@@ -65,16 +65,23 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         let tessData = args["tessData"] as? String
         let rawConfig = (args["config"] as? [String: Any]) ?? args
 
+        // Resolve the engine locally. The Dart side sends a plain string
+        // ("vision" / "tesseract" / "defaultEngine"). Only "vision" routes to
+        // Apple Vision; every other value (including the "defaultEngine" sent by
+        // the historical default) stays on Tesseract so an iOS caller that omits
+        // `engine` keeps using tessData/options/languages instead of silently
+        // being downgraded to Vision (en/fr/de/es only).
+        let engineString = (rawConfig["engine"] as? String)?.lowercased()
+        let useVision = (engineString == "vision")
+
         #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
-        let selectedEngine = OCREngineConfig.shared.configure(fromParams: rawConfig)
-        switch selectedEngine {
-        case .appleVision:
+        if useVision {
             performVisionOCR(
                 imagePath: imagePath,
                 language: language,
                 result: result
             )
-        case .swiftyTesseract:
+        } else {
             performTesseractOCR(
                 imagePath: imagePath,
                 language: language,
@@ -84,6 +91,14 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             )
         }
         #elseif canImport(SwiftyTesseract)
+        if useVision {
+            result(FlutterError(
+                code: "UNSUPPORTED_ENGINE",
+                message: "Apple Vision engine is only supported on iOS. Use OCREngine.tesseract or OCREngine.defaultEngine on this platform.",
+                details: nil
+            ))
+            return
+        }
         performTesseractOCR(
             imagePath: imagePath,
             language: language,
@@ -117,23 +132,29 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         }
 
         let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-        let request = VNRecognizeTextRequest { [weak self] (request, error) in
-            guard let self = self else { return }
+        let request = VNRecognizeTextRequest { (request, error) in
+            // The completion runs on Vision's own queue; reply on the main queue
+            // like every other path. `self` is not needed here, so there is no
+            // weak capture that could drop the reply if the plugin deallocates.
             if let error = error {
-                result(FlutterError(
-                    code: "OCR_ERROR",
-                    message: "Vision OCR failed: \(error.localizedDescription)",
-                    details: nil
-                ))
+                DispatchQueue.main.async {
+                    result(FlutterError(
+                        code: "OCR_ERROR",
+                        message: "Vision OCR failed: \(error.localizedDescription)",
+                        details: nil
+                    ))
+                }
                 return
             }
 
             guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                result(FlutterError(
-                    code: "OCR_NO_RESULTS",
-                    message: "No text observations found",
-                    details: nil
-                ))
+                DispatchQueue.main.async {
+                    result(FlutterError(
+                        code: "OCR_NO_RESULTS",
+                        message: "No text observations found",
+                        details: nil
+                    ))
+                }
                 return
             }
 
@@ -141,7 +162,9 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 observation.topCandidates(1).first?.string
             }
             let text = recognizedStrings.joined(separator: "\n")
-            result(text)
+            DispatchQueue.main.async {
+                result(text)
+            }
         }
 
         request.recognitionLevel = .accurate
@@ -187,19 +210,17 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
 
         guard !languageParts.isEmpty else { return nil }
 
+        // Flutter bundles assets under `flutter_assets` inside the app/framework
+        // bundle, so the Dart-provided `tessData` path is the only candidate that
+        // reliably resolves on iOS and macOS. `Bundle.main.resourceURL/tessdata`
+        // and `.../flutter_assets/assets/tessdata` never exist in a real Flutter
+        // app, so they are not worth probing.
         var candidates: [String] = []
         if let tessData = tessData?.trimmingCharacters(in: .whitespacesAndNewlines),
            !tessData.isEmpty {
             candidates.append(tessData)
             candidates.append((tessData as NSString).appendingPathComponent("tessdata"))
         }
-
-        if let resourceURL = Bundle.main.resourceURL {
-            candidates.append((resourceURL as NSURL).appendingPathComponent("tessdata")?.path ?? "")
-            candidates.append((resourceURL as NSURL).appendingPathComponent("flutter_assets/assets/tessdata")?.path ?? "")
-        }
-        candidates.append((Bundle.main.bundleURL as NSURL).appendingPathComponent("tessdata")?.path ?? "")
-        candidates.append((Bundle.main.bundleURL as NSURL).appendingPathComponent("flutter_assets/assets/tessdata")?.path ?? "")
 
         for candidate in candidates where !candidate.isEmpty {
             var isDirectory: ObjCBool = false
@@ -264,7 +285,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 .split(separator: "+")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            let basePathDescription = (tessData?.isEmpty == false) ? tessData! : "Bundle.main/tessdata"
+            let basePathDescription = (tessData?.isEmpty == false) ? tessData! : "tessdata (provided by the app)"
             let missingFiles = languageParts
                 .map { "\($0).traineddata" }
                 .joined(separator: ", ")
@@ -276,10 +297,9 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        // Configure Tesseract
-        let languageCodes = language.split(separator: "+").map { String($0) }
-
-        // Determine engine mode
+        // Determine engine mode. SwiftyTesseract 4.0.1 defines `EngineMode` as a
+        // typealias of `TessOcrEngineMode` with members: tesseractOnly, lstmOnly,
+        // tesseractLstmCombined, default (no `defaultEngine`).
         let engineMode: EngineMode
         if let engineStr = config?["engine"] as? String {
             switch engineStr.lowercased() {
@@ -297,58 +317,18 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 return
                 #endif
             default:
-                engineMode = .defaultEngine
+                engineMode = .default
             }
         } else {
             engineMode = .lstmOnly
         }
 
-        // Create Tesseract instance against the validated tessdata path via TessBaseAPI
-        guard let tessBaseAPI = TessBaseAPICreate() else {
-            result(FlutterError(
-                code: "OCR_INIT_FAILED",
-                message: "Failed to create Tesseract API instance.",
-                details: nil
-            ))
-            return
-        }
-        defer {
-            TessBaseAPIEnd(tessBaseAPI)
-            TessBaseAPIDelete(tessBaseAPI)
-        }
-
-        let initReturnCode = TessBaseAPIInit2(
-            tessBaseAPI,
-            validatedTessData.directoryPath,
-            language,
-            engineMode
-        )
-        guard initReturnCode == 0 else {
-            result(FlutterError(
-                code: "OCR_INIT_FAILED",
-                message: "Failed to initialize Tesseract with language '\(language)' at '\(validatedTessData.directoryPath)' (code: \(initReturnCode)). Ensure \(validatedTessData.trainedDataFiles.joined(separator: ", ")) matches the selected engine mode.",
-                details: nil
-            ))
-            return
-        }
-
-        if let options = config?["options"] as? [String: Any] {
-            for (key, value) in options {
-                let strValue: String
-                if let s = value as? String {
-                    strValue = s
-                } else if let b = value as? Bool {
-                    strValue = b ? "1" : "0"
-                } else if let n = value as? NSNumber {
-                    strValue = n.stringValue
-                } else {
-                    strValue = "\(value)"
-                }
-                TessBaseAPISetVariable(tessBaseAPI, key, strValue)
-            }
-        }
-
-        // Perform OCR on a serial queue to prevent race conditions
+        // Perform OCR on a serial queue to prevent race conditions.
+        //
+        // The Tesseract handle is created, initialized, used, ended and deleted
+        // ALL inside this dispatched closure: a `defer` at function scope would
+        // run as soon as the outer function returned, deleting the handle before
+        // the async block touches it (use-after-free).
         DispatchQueue(label: "com.tesseract.ocr", qos: .userInitiated).async {
             // The timeout and the OCR completion can race: without this guard
             // `result` would be called twice (once by whichever finishes first,
@@ -365,6 +345,51 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 }
             }
 
+            // Create Tesseract instance against the validated tessdata path via TessBaseAPI
+            guard let tessBaseAPI = TessBaseAPICreate() else {
+                completeOnce(FlutterError(
+                    code: "OCR_INIT_FAILED",
+                    message: "Failed to create Tesseract API instance.",
+                    details: nil
+                ))
+                return
+            }
+            defer {
+                TessBaseAPIEnd(tessBaseAPI)
+                TessBaseAPIDelete(tessBaseAPI)
+            }
+
+            let initReturnCode = TessBaseAPIInit2(
+                tessBaseAPI,
+                validatedTessData.directoryPath,
+                language,
+                engineMode
+            )
+            guard initReturnCode == 0 else {
+                completeOnce(FlutterError(
+                    code: "OCR_INIT_FAILED",
+                    message: "Failed to initialize Tesseract with language '\(language)' at '\(validatedTessData.directoryPath)' (code: \(initReturnCode)). Ensure \(validatedTessData.trainedDataFiles.joined(separator: ", ")) matches the selected engine mode.",
+                    details: nil
+                ))
+                return
+            }
+
+            if let options = config?["options"] as? [String: Any] {
+                for (key, value) in options {
+                    let strValue: String
+                    if let s = value as? String {
+                        strValue = s
+                    } else if let b = value as? Bool {
+                        strValue = b ? "1" : "0"
+                    } else if let n = value as? NSNumber {
+                        strValue = n.stringValue
+                    } else {
+                        strValue = "\(value)"
+                    }
+                    TessBaseAPISetVariable(tessBaseAPI, key, strValue)
+                }
+            }
+
             // Set up timeout
             let timeoutWorkItem = DispatchWorkItem {
                 completeOnce(FlutterError(
@@ -377,7 +402,19 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             DispatchQueue.main.asyncAfter(deadline: .now() + 30.0, execute: timeoutWorkItem)
 
             // Perform OCR
-            guard let pix = pixReadMem([UInt8](imageData).withUnsafeBytes { $0.baseAddress }, imageData.count) else {
+            //
+            // `withUnsafeBytes` hands over an `UnsafeRawBufferPointer` whose
+            // base address is an `UnsafeRawPointer?`; `pixReadMem` wants an
+            // `UnsafePointer<UInt8>`, so bind the memory explicitly to UInt8.
+            // pixReadMem copies the bytes, so the buffer is only needed for the
+            // duration of this call.
+            let pix = imageData.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> OpaquePointer? in
+                guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                    return nil
+                }
+                return pixReadMem(base, imageData.count)
+            }
+            guard let pix = pix else {
                 timeoutWorkItem.cancel()
                 completeOnce(FlutterError(
                     code: "OCR_PROCESS_ERROR",

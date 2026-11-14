@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, development ]
+  pull_request:
+    branches: [ master, development ]
+
+jobs:
+  # Real build gate for the Apple (SwiftPM) path. The substring tests in
+  # test/tesseract_ocr_test.dart cannot fail on a tree that does not compile
+  # (they only read the Swift file as text), so this is the step that actually
+  # catches a broken plugin source.
+  swift-build:
+    name: swift build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: swift build
+        run: swift build
+      - name: swift build (release)
+        run: swift build -c release
+
+  # Dart/flutter side of the plugin.
+  dart:
+    name: dart test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
