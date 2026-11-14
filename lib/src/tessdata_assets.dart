@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 
@@ -34,14 +33,21 @@ class TessDataAssets {
         'is not valid JSON (${error.message})',
       );
     }
-    if (decoded is! Map<String, dynamic>) {
+    if (decoded is! Map) {
       throw _configException(
         configAsset,
         'must be a JSON object with a "files" list',
       );
     }
-    final Object? files = decoded['files'];
-    if (files is! List || files.isEmpty) {
+    final Object? files = (decoded as Map<Object?, Object?>)['files'];
+    if (files is! List) {
+      throw _configException(
+        configAsset,
+        'must list every traineddata file in a "files" array of '
+        '.traineddata names',
+      );
+    }
+    if (files.isEmpty) {
       throw _configException(
         configAsset,
         'lists no traineddata file — "files" must hold at least one '
@@ -49,24 +55,8 @@ class TessDataAssets {
       );
     }
     return files
-        .map((Object? file) => _validateFileName(file?.toString(), configAsset))
+        .map((Object? file) => _validateFileName(file, configAsset))
         .toList(growable: false);
-  }
-
-  /// A traineddata asset the bundle must carry, or the destination that copy
-  /// produced — both have to exist and hold bytes.
-  static void validateTessDataFile(File file, String assetPath) {
-    final int length = file.existsSync() ? file.lengthSync() : -1;
-    if (length <= 0) {
-      throw PlatformException(
-        code: invalidAssetCode,
-        message: _assetProblem(
-          assetPath,
-          'is missing or empty in the tessdata directory '
-          '"${file.parent.path}" after the copy from assets',
-        ),
-      );
-    }
   }
 
   /// The asset bundle handed back a traineddata with no bytes.
@@ -74,41 +64,65 @@ class TessDataAssets {
     if (byteLength <= 0) {
       throw PlatformException(
         code: invalidAssetCode,
-        message:
-            _assetProblem(assetPath, 'carries no bytes in the asset bundle'),
+        message: _assetProblem(assetPath, 'carries no bytes'),
       );
     }
   }
 
-  /// Whether [assetLength] bytes have to be written over the destination.
-  ///
-  /// An earlier run that died mid-write (or wrote an empty placeholder) leaves
-  /// a file behind; `exists()` alone would keep skipping it forever, so the
-  /// destination has to match the asset's length to count as copied.
-  static bool needsCopy(
-      {required int? existingLength, required int assetLength}) {
-    return existingLength == null || existingLength != assetLength;
-  }
-
   /// Thrown when the asset bundle cannot produce [assetPath] at all.
-  static PlatformException missingAssetException(
+  ///
+  /// [detail] separates a bundle that carries no such asset from one that could
+  /// not be read (a decode failure, an out-of-memory read, a bundle from the
+  /// wrong build): a crash report's first sentence should not claim a missing
+  /// asset for every one of them.
+  static PlatformException unreadableAssetException(
     String assetPath, {
     required Object cause,
+    required String detail,
   }) {
     return PlatformException(
       code: invalidAssetCode,
-      message:
-          '${_assetProblem(assetPath, 'is not carried by the asset bundle')}\n'
-          'Cause: $cause',
+      message: '${_assetProblem(assetPath, detail)}\nCause: $cause',
     );
   }
 
-  static String _validateFileName(String? fileName, String configAsset) {
-    final String name = fileName?.trim() ?? '';
-    if (name.isEmpty || name.contains('..') || name.startsWith('/')) {
+  /// Whether the destination has to be re-written because [assetBytes] differ
+  /// from it.
+  ///
+  /// A [knownLength] of `null` means this isolate has not read the asset yet, so
+  /// only the destination's own length is known — the copy decision is then a
+  /// plain length comparison, which an earlier run that died mid-write (or wrote
+  /// an empty placeholder) cannot defeat. Once the asset bytes are in hand, the
+  /// decision is a real comparison: a same-length file from an older build is
+  /// refreshed too, which the length-only test could never see.
+  static bool needsCopy({
+    required Object? assetBytes,
+    required int? knownLength,
+    required Uint8List? destinationBytes,
+  }) {
+    if (assetBytes is Uint8List) {
+      if (destinationBytes == null) return true;
+      if (destinationBytes.length != assetBytes.length) return true;
+      for (int i = 0; i < assetBytes.length; i++) {
+        if (destinationBytes[i] != assetBytes[i]) return true;
+      }
+      return false;
+    }
+    final int assetLength = knownLength as int;
+    return destinationBytes == null || destinationBytes.length != assetLength;
+  }
+
+  static String _validateFileName(Object? entry, String configAsset) {
+    final String name = entry is String ? entry.trim() : '';
+    if (name.isEmpty ||
+        name == '.' ||
+        name.contains('..') ||
+        name.contains('/') ||
+        name.contains('\\')) {
       throw _configException(
         configAsset,
-        'lists an invalid traineddata file name "$fileName"',
+        'lists an invalid traineddata file name "$entry" — "files" must hold '
+        'plain .traineddata file names, not paths',
       );
     }
     return name;

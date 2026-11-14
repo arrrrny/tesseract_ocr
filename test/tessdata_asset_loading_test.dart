@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tesseract_ocr/src/io_helper_io.dart'
+    if (dart.library.html) 'package:tesseract_ocr/src/io_helper_stub.dart';
 import 'package:tesseract_ocr/src/tessdata_assets.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 
@@ -53,6 +55,9 @@ void main() {
   }
 
   setUp(() async {
+    // The copy is memoised for the life of an isolate, and one test process runs
+    // many app lifetimes: each case has to start from a cold memo.
+    debugResetTessDataCache();
     tempDir = await Directory.systemTemp.createTemp('tessdata_assets_test_');
     resolveAsset = (_) => null;
     // A successful config read is cached on the bundle for the whole test
@@ -221,6 +226,60 @@ void main() {
       expect(await copied.readAsBytes(), <int>[1, 2, 3, 4]);
     });
 
+    test('does not re-read the traineddata asset once it is copied', () async {
+      final File image = await writeImage();
+      int trainedDataReads = 0;
+      resolveAsset = (String key) {
+        if (key == 'assets/tessdata_config.json') {
+          return configAsset(<String>['eng.traineddata']);
+        }
+        if (key == 'assets/tessdata/eng.traineddata') {
+          trainedDataReads++;
+          return trainedDataAsset(<int>[1, 2, 3, 4]);
+        }
+        return null;
+      };
+
+      await TesseractOcr.extractText(image.path);
+      expect(trainedDataReads, 1);
+
+      // `loadTessDataToAppDocuments` runs on every call without an explicit
+      // `tessDataPath`: the asset is immutable for the process lifetime, so
+      // these calls must not re-read and re-decompress it on the UI isolate.
+      await TesseractOcr.extractText(image.path);
+      await TesseractOcr.extractText(image.path);
+
+      expect(trainedDataReads, 1);
+    });
+
+    test('repairs a traineddata deleted from the tessdata dir mid-session',
+        () async {
+      final File image = await writeImage();
+      serveEngOnly(<int>[1, 2, 3, 4]);
+      final File copied = File('${tempDir.path}/tessdata/eng.traineddata');
+
+      await TesseractOcr.extractText(image.path);
+      expect(await copied.exists(), isTrue);
+
+      await copied.delete();
+      await TesseractOcr.extractText(image.path);
+
+      expect(await copied.readAsBytes(), <int>[1, 2, 3, 4]);
+    });
+
+    test('repairs a truncated traineddata deleted mid-session', () async {
+      final File image = await writeImage();
+      serveEngOnly(<int>[1, 2, 3, 4]);
+      final File copied = File('${tempDir.path}/tessdata/eng.traineddata');
+
+      await TesseractOcr.extractText(image.path);
+      await copied.writeAsBytes(<int>[1, 2]);
+
+      await TesseractOcr.extractText(image.path);
+
+      expect(await copied.readAsBytes(), <int>[1, 2, 3, 4]);
+    });
+
     test('throws when tessdata_config.json lists no file', () async {
       final File image = await writeImage();
       resolveAsset = (String key) =>
@@ -246,17 +305,29 @@ void main() {
 
     test('throws when tessdata_config.json is not a JSON object', () async {
       final File image = await writeImage();
-      resolveAsset = (String key) =>
-          key == 'assets/tessdata_config.json' ? ByteData(0) : null;
+      // `[]` parses to a List, so it reaches the "must be a JSON object" branch
+      // — an empty asset would fail as invalid JSON instead.
+      resolveAsset = (String key) => key == 'assets/tessdata_config.json'
+          ? ByteData.sublistView(Uint8List.fromList(utf8.encode('[]')))
+          : null;
 
       await expectLater(
         () => TesseractOcr.extractText(image.path),
         throwsA(
-          isA<PlatformException>().having(
-            (PlatformException e) => e.code,
-            'code',
-            TessDataAssets.invalidConfigCode,
-          ),
+          isA<PlatformException>()
+              .having(
+                (PlatformException e) => e.code,
+                'code',
+                TessDataAssets.invalidConfigCode,
+              )
+              .having(
+                (PlatformException e) => e.message,
+                'message',
+                allOf(
+                  contains('must be a JSON object'),
+                  contains('assets/tessdata_config.json'),
+                ),
+              ),
         ),
       );
     });
@@ -297,54 +368,126 @@ void main() {
       );
     });
 
-    test('needsCopy compares the destination length to the asset length', () {
+    test('parseFileNames rejects anything that is not a flat file name', () {
+      for (final String name in <String>[
+        'sub/eng.traineddata',
+        r'sub\eng.traineddata',
+        '.',
+      ]) {
+        expect(
+          () => TessDataAssets.parseFileNames(
+            '{"files": ["$name"]}',
+            configAsset: 'assets/tessdata_config.json',
+          ),
+          throwsA(
+            isA<PlatformException>().having(
+              (PlatformException e) => e.code,
+              'code',
+              TessDataAssets.invalidConfigCode,
+            ),
+          ),
+          reason: name,
+        );
+      }
+    });
+
+    test('parseFileNames rejects a files entry that is not a string', () {
       expect(
-        TessDataAssets.needsCopy(existingLength: null, assetLength: 4),
+        () => TessDataAssets.parseFileNames(
+          '{"files": [123]}',
+          configAsset: 'assets/tessdata_config.json',
+        ),
+        throwsA(
+          isA<PlatformException>()
+              .having(
+                (PlatformException e) => e.code,
+                'code',
+                TessDataAssets.invalidConfigCode,
+              )
+              .having(
+                (PlatformException e) => e.message,
+                'message',
+                contains('123'),
+              ),
+        ),
+      );
+    });
+
+    test('parseFileNames rejects a "files" value that is not a list', () {
+      expect(
+        () => TessDataAssets.parseFileNames(
+          '{"files": "eng.traineddata"}',
+          configAsset: 'assets/tessdata_config.json',
+        ),
+        throwsA(
+          isA<PlatformException>().having(
+            (PlatformException e) => e.code,
+            'code',
+            TessDataAssets.invalidConfigCode,
+          ),
+        ),
+      );
+    });
+
+    test('needsCopy writes when the destination is absent', () {
+      expect(
+        TessDataAssets.needsCopy(
+          assetBytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+          knownLength: null,
+          destinationBytes: null,
+        ),
         isTrue,
       );
+    });
+
+    test('needsCopy leaves a destination that matches the asset', () {
       expect(
-        TessDataAssets.needsCopy(existingLength: 0, assetLength: 4),
-        isTrue,
-      );
-      expect(
-        TessDataAssets.needsCopy(existingLength: 2, assetLength: 4),
-        isTrue,
-      );
-      expect(
-        TessDataAssets.needsCopy(existingLength: 4, assetLength: 4),
+        TessDataAssets.needsCopy(
+          assetBytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+          knownLength: null,
+          destinationBytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+        ),
         isFalse,
       );
     });
 
-    test('validateTessDataFile rejects a missing or empty destination',
-        () async {
-      final Directory dir = await Directory.systemTemp.createTemp('tessdata_');
-      addTearDown(() => dir.delete(recursive: true));
-      final File empty = File('${dir.path}/empty.traineddata');
-      await empty.writeAsBytes(<int>[]);
-      final File missing = File('${dir.path}/missing.traineddata');
+    test('needsCopy rewrites a same-length file that holds other bytes', () {
+      // The length-only test could never see a traineddata replaced by another
+      // build of the same language.
+      expect(
+        TessDataAssets.needsCopy(
+          assetBytes: Uint8List.fromList(<int>[1, 2, 3, 5]),
+          knownLength: null,
+          destinationBytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
+        ),
+        isTrue,
+      );
+    });
 
+    test('needsCopy falls back to the asset length when it is unknown', () {
       expect(
-        () => TessDataAssets.validateTessDataFile(
-          empty,
-          'assets/tessdata/empty.traineddata',
+        TessDataAssets.needsCopy(
+          assetBytes: null,
+          knownLength: 4,
+          destinationBytes: null,
         ),
-        throwsA(isA<PlatformException>()),
+        isTrue,
       );
       expect(
-        () => TessDataAssets.validateTessDataFile(
-          missing,
-          'assets/tessdata/missing.traineddata',
+        TessDataAssets.needsCopy(
+          assetBytes: null,
+          knownLength: 4,
+          destinationBytes: Uint8List.fromList(<int>[1, 2]),
         ),
-        throwsA(isA<PlatformException>()),
+        isTrue,
       );
-      await empty.writeAsBytes(<int>[1]);
       expect(
-        () => TessDataAssets.validateTessDataFile(
-          empty,
-          'assets/tessdata/empty.traineddata',
+        TessDataAssets.needsCopy(
+          assetBytes: null,
+          knownLength: 4,
+          destinationBytes: Uint8List.fromList(<int>[1, 2, 3, 4]),
         ),
-        returnsNormally,
+        isFalse,
       );
     });
   });
