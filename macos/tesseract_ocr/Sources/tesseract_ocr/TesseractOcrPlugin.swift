@@ -1,0 +1,358 @@
+import Cocoa
+import FlutterMacOS
+
+public class TesseractOcrPlugin: NSObject, FlutterPlugin {
+  public static func register(with registrar: FlutterPluginRegistrar) {
+    let channel = FlutterMethodChannel(
+      name: "tesseract_ocr",
+      binaryMessenger: registrar.messenger
+    )
+    let instance = TesseractOcrPlugin()
+    registrar.addMethodCallDelegate(instance, channel: channel)
+  }
+
+  public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "getPlatformVersion":
+      result("macOS " + ProcessInfo.processInfo.operatingSystemVersionString)
+    case "extractText", "extractHocr":
+      handleExtract(call: call, isHocr: call.method == "extractHocr", result: result)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func handleExtract(
+    call: FlutterMethodCall,
+    isHocr: Bool,
+    result: @escaping FlutterResult
+  ) {
+    guard let params = call.arguments as? [String: Any] else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENTS",
+          message: "Arguments were invalid or could not be parsed.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    let config = params["config"] as? [String: Any]
+    let engine = (params["engine"] as? String) ?? (config?["engine"] as? String)
+    if let engine = engine, engine.lowercased() == "vision" {
+      result(
+        FlutterError(
+          code: "UNSUPPORTED_ENGINE",
+          message:
+            "Apple Vision engine is only supported on iOS. Use OCREngine.tesseract or OCREngine.defaultEngine on macOS.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard let imagePath = params["imagePath"] as? String, !imagePath.isEmpty else {
+      result(
+        FlutterError(
+          code: "MISSING_PARAMS",
+          message: "Required parameter 'imagePath' is missing.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    let fileManager = FileManager.default
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: imagePath, isDirectory: &isDirectory) else {
+      result(
+        FlutterError(
+          code: "IMAGE_NOT_FOUND",
+          message: "Image file does not exist at path: \(imagePath)",
+          details: nil
+        )
+      )
+      return
+    }
+
+    if isDirectory.boolValue {
+      result(
+        FlutterError(
+          code: "IMAGE_LOAD_FAILED",
+          message: "Expected an image file but found a directory at path: \(imagePath)",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard fileManager.isReadableFile(atPath: imagePath) else {
+      result(
+        FlutterError(
+          code: "IMAGE_UNREADABLE",
+          message: "Image file is not readable at path: \(imagePath)",
+          details: nil
+        )
+      )
+      return
+    }
+
+    if let attributes = try? fileManager.attributesOfItem(atPath: imagePath),
+       let fileSize = attributes[.size] as? NSNumber,
+       fileSize.int64Value == 0 {
+      result(
+        FlutterError(
+          code: "IMAGE_LOAD_FAILED",
+          message: "Image file is empty at path: \(imagePath)",
+          details: nil
+        )
+      )
+      return
+    }
+
+    let rawLanguage =
+      (params["language"] as? String) ?? (config?["language"] as? String) ?? "eng"
+    let trimmedLanguage = rawLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+    let language = trimmedLanguage.isEmpty ? "eng" : trimmedLanguage
+
+    let rawTessData =
+      (params["tessData"] as? String) ?? (config?["tessDataPath"] as? String)
+    guard let tessDataBase = rawTessData?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !tessDataBase.isEmpty else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGUMENT",
+          message: "Data path must not be null! Ensure tessdata is properly loaded.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard let resolvedTessDataDir = resolveTessDataDirectory(
+      basePath: tessDataBase,
+      language: language,
+      fileManager: fileManager
+    ) else {
+      let languageParts = language.split(separator: "+").map { String($0) }
+      let missingFiles = languageParts
+        .filter { !fileManager.fileExists(atPath: "\(tessDataBase)/\($0).traineddata") && !fileManager.fileExists(atPath: "\(tessDataBase)/tessdata/\($0).traineddata") }
+        .map { "\($0).traineddata" }
+      let detail = missingFiles.isEmpty
+        ? "No tessdata directory found at '\(tessDataBase)'."
+        : "Missing trained data file(s) \(missingFiles.joined(separator: ", ")) in '\(tessDataBase)'."
+      result(
+        FlutterError(
+          code: "TESSDATA_NOT_FOUND",
+          message:
+            "\(detail) Ensure the .traineddata file is listed in assets/tessdata_config.json and bundled in assets/tessdata/.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard let tesseractExecutable = findTesseractExecutable(fileManager: fileManager) else {
+      result(
+        FlutterError(
+          code: "TESSERACT_NOT_FOUND",
+          message:
+            "Tesseract executable not found on this Mac. Install it with 'brew install tesseract' (or set TESSERACT_PATH).",
+          details: nil
+        )
+      )
+      return
+    }
+
+    var arguments: [String] = [
+      imagePath,
+      "stdout",
+      "--tessdata-dir",
+      resolvedTessDataDir,
+      "-l",
+      language,
+    ]
+
+    let mergedOptions = collectOptions(params: params, config: config)
+    for key in mergedOptions.keys.sorted() {
+      guard let rawValue = mergedOptions[key] else { continue }
+      let value = "\(rawValue)"
+      if key == "tessedit_pageseg_mode" {
+        arguments.append(contentsOf: ["--psm", value])
+      } else if key == "tessedit_ocr_engine_mode" {
+        arguments.append(contentsOf: ["--oem", value])
+      } else {
+        arguments.append(contentsOf: ["-c", "\(key)=\(value)"])
+      }
+    }
+
+    if isHocr {
+      arguments.append("hocr")
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: tesseractExecutable)
+      process.arguments = arguments
+
+      var environment = ProcessInfo.processInfo.environment
+      let existingPath = environment["PATH"] ?? "/usr/bin:/bin"
+      environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(existingPath)"
+      process.environment = environment
+
+      let stdoutPipe = Pipe()
+      let stderrPipe = Pipe()
+      process.standardOutput = stdoutPipe
+      process.standardError = stderrPipe
+
+      do {
+        try process.run()
+      } catch {
+        DispatchQueue.main.async {
+          result(
+            FlutterError(
+              code: "TESSERACT_LAUNCH_FAILED",
+              message:
+                "Failed to launch Tesseract at '\(tesseractExecutable)': \(error.localizedDescription). If App Sandbox is enabled, disable com.apple.security.app-sandbox in your macOS entitlements.",
+              details: nil
+            )
+          )
+        }
+        return
+      }
+
+      var stdoutData = Data()
+      var stderrData = Data()
+      let ioGroup = DispatchGroup()
+
+      ioGroup.enter()
+      DispatchQueue.global(qos: .userInitiated).async {
+        stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        ioGroup.leave()
+      }
+
+      ioGroup.enter()
+      DispatchQueue.global(qos: .userInitiated).async {
+        stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        ioGroup.leave()
+      }
+
+      ioGroup.wait()
+      process.waitUntilExit()
+
+      let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+      let stderrText = (String(data: stderrData, encoding: .utf8) ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+      DispatchQueue.main.async {
+        if process.terminationStatus == 0 {
+          let cleaned = stdoutText.trimmingCharacters(
+            in: CharacterSet(charactersIn: "\u{000C}")
+          )
+          result(cleaned)
+        } else {
+          let message = stderrText.isEmpty
+            ? "Tesseract failed with exit status \(process.terminationStatus) for image '\(imagePath)'."
+            : "Tesseract failed (exit status \(process.terminationStatus)): \(stderrText)"
+          result(
+            FlutterError(
+              code: "OCR_PROCESS_ERROR",
+              message: message,
+              details: nil
+            )
+          )
+        }
+      }
+    }
+  }
+
+  private func resolveTessDataDirectory(
+    basePath: String,
+    language: String,
+    fileManager: FileManager
+  ) -> String? {
+    let languageParts = language
+      .split(separator: "+")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+
+    let candidates = [
+      basePath,
+      (basePath as NSString).appendingPathComponent("tessdata"),
+    ]
+
+    for candidate in candidates {
+      var isDir: ObjCBool = false
+      guard fileManager.fileExists(atPath: candidate, isDirectory: &isDir),
+            isDir.boolValue else {
+        continue
+      }
+      if languageParts.isEmpty {
+        return candidate
+      }
+      let allPresent = languageParts.allSatisfy { part in
+        let trainedDataPath = (candidate as NSString).appendingPathComponent(
+          "\(part).traineddata"
+        )
+        return fileManager.fileExists(atPath: trainedDataPath)
+      }
+      if allPresent {
+        return candidate
+      }
+    }
+
+    return nil
+  }
+
+  private func findTesseractExecutable(fileManager: FileManager) -> String? {
+    var candidates: [String] = []
+    if let overridePath = ProcessInfo.processInfo.environment["TESSERACT_PATH"],
+       !overridePath.isEmpty {
+      candidates.append(overridePath)
+    }
+
+    candidates.append(contentsOf: [
+      "/opt/homebrew/bin/tesseract",
+      "/usr/local/bin/tesseract",
+      "/opt/local/bin/tesseract",
+      "/usr/bin/tesseract",
+    ])
+
+    if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
+      for dir in pathEnv.split(separator: ":") {
+        let candidate = (String(dir) as NSString).appendingPathComponent("tesseract")
+        candidates.append(candidate)
+      }
+    }
+
+    for candidate in candidates {
+      if fileManager.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
+    return nil
+  }
+
+  private func collectOptions(
+    params: [String: Any],
+    config: [String: Any]?
+  ) -> [String: Any] {
+    let reservedKeys: Set<String> = ["language", "engine", "tessDataPath"]
+    var collected: [String: Any] = [:]
+
+    if let config = config {
+      for (key, value) in config where !reservedKeys.contains(key) {
+        collected[key] = value
+      }
+    }
+
+    if let options = params["options"] as? [String: Any] {
+      for (key, value) in options where !reservedKeys.contains(key) {
+        collected[key] = value
+      }
+    }
+
+    return collected
+  }
+}
