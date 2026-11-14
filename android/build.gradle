@@ -36,6 +36,7 @@ android {
 
 dependencies {
     implementation 'cz.adaptech.tesseract4android:tesseract4android:4.8.0'
+    testImplementation 'junit:junit:4.12'
     implementation 'androidx.lifecycle:lifecycle-process:2.6.2'
     implementation 'androidx.lifecycle:lifecycle-runtime:2.6.2'
     implementation 'androidx.lifecycle:lifecycle-common:2.6.2'
