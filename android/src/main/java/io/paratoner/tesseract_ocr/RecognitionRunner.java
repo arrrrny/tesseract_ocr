@@ -88,6 +88,7 @@ class RecognitionRunner {
         String imagePath,
         String language,
         boolean hocr,
+        OcrOptions options,
         Reply reply
     ) {
         if (!attached.get()) {
@@ -119,6 +120,7 @@ class RecognitionRunner {
 
         final String languageOrDefault = language == null ? "eng" : language;
         final File image = new File(imagePath);
+        final OcrOptions resolvedOptions = options == null ? OcrOptions.NONE : options;
 
         try {
             executor.execute(
@@ -128,6 +130,7 @@ class RecognitionRunner {
                         image,
                         languageOrDefault,
                         hocr,
+                        resolvedOptions,
                         reply
                     )
             );
@@ -156,6 +159,7 @@ class RecognitionRunner {
         File image,
         String language,
         boolean hocr,
+        OcrOptions options,
         Reply reply
     ) {
         NativeOcrApi baseApi = null;
@@ -197,6 +201,13 @@ class RecognitionRunner {
                 );
                 return;
             }
+
+            // The caller's options sit between init and the image: the PSM is
+            // part of how the engine was configured, and a failure to apply one
+            // must be the caller's error, not a failed recognition. A native
+            // bridge can fail with an Error here as well as an Exception, which
+            // is what the catch below is for.
+            baseApi.applyOptions(options.pageSegMode(), options.variables());
             baseApi.setImage(image);
             final String recognizedText = hocr
                 ? baseApi.getHocrText()

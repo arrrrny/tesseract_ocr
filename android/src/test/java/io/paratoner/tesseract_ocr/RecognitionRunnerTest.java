@@ -7,7 +7,9 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.File;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -51,7 +53,7 @@ public class RecognitionRunnerTest {
     public void recognizesTextAndRecyclesTheHandle() {
         api.text = "recognized";
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("recognized", reply.awaitSuccess());
         assertEquals(LANGUAGE, api.initLanguage.get());
@@ -64,7 +66,7 @@ public class RecognitionRunnerTest {
     public void usesTheHocrPathForHocrRequests() {
         api.hocrText = "<span class='ocr_line'>hi</span>";
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, true, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, true, OcrOptions.NONE, reply);
 
         assertEquals("<span class='ocr_line'>hi</span>", reply.awaitSuccess());
         assertEquals(1, api.recycleCount());
@@ -72,8 +74,8 @@ public class RecognitionRunnerTest {
 
     @Test
     public void missingArgumentsAreRejectedWithoutTouchingTheEngine() {
-        runner.recognize(null, IMAGE, LANGUAGE, false, reply);
-        runner.recognize(TESS_DATA, null, LANGUAGE, false, reply);
+        runner.recognize(null, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
+        runner.recognize(TESS_DATA, null, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertNull(api.initLanguage.get());
         assertEquals(0, api.recycleCount());
@@ -85,7 +87,7 @@ public class RecognitionRunnerTest {
     public void failedInitIsReportedThroughTheReply() {
         api.initResult = false;
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("INIT_ERROR", reply.awaitError());
         assertEquals(1, api.recycleCount());
@@ -96,7 +98,7 @@ public class RecognitionRunnerTest {
     public void failedRecognitionIsReportedInsteadOfCrashing() {
         api.readFailure = new IllegalStateException("native read failed");
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("RECOGNITION_ERROR", reply.awaitError());
         assertTrue(reply.lastErrorMessage().contains("native read failed"));
@@ -107,7 +109,7 @@ public class RecognitionRunnerTest {
     public void initThrowsAnErrorIsReportedAsANativeError() {
         api.initFailure = new UnsatisfiedLinkError("libtesseract.so missing");
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("NATIVE_ERROR", reply.awaitError());
         assertEquals(1, api.recycleCount());
@@ -122,7 +124,7 @@ public class RecognitionRunnerTest {
             "Data path must contain subfolder tessdata!"
         );
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("INIT_ERROR", reply.awaitError());
         assertTrue(reply.lastErrorMessage().contains("tessdata"));
@@ -136,7 +138,7 @@ public class RecognitionRunnerTest {
 
         // One recognition runs, the intake holds its bound, the rest are refused.
         for (int i = 0; i <= RecognitionRunner.MAX_QUEUED_RECOGNITIONS + 1; i++) {
-            runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+            runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
         }
         assertTrue(api.awaitReadStarted());
 
@@ -152,29 +154,75 @@ public class RecognitionRunnerTest {
         runner.stop();
         runner = new RecognitionRunner(() -> null);
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("NATIVE_ERROR", reply.awaitError());
+    }
+
+    @Test
+    public void anOptionTheEngineRefusesIsReportedRatherThanCrashing() {
+        api.optionsFailure = new IllegalStateException("unknown variable");
+
+        runner.recognize(
+            TESS_DATA,
+            IMAGE,
+            LANGUAGE,
+            false,
+            new OcrOptions(7, java.util.Collections.<String, String>emptyMap()),
+            reply
+        );
+
+        assertEquals("RECOGNITION_ERROR", reply.awaitError());
+        assertTrue(reply.lastErrorMessage().contains("unknown variable"));
+        assertEquals(1, api.recycleCount());
+        assertEquals(0, api.imageCount());
     }
 
     @Test
     public void workRunsOffTheCallingThread() {
         final String caller = Thread.currentThread().getName();
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         reply.awaitSuccess();
         assertFalse(caller.equals(api.threadName.get()));
     }
 
     @Test
+    public void theRequestedOptionsReachTheEngineAfterInit() {
+        final Map<String, String> variables = new LinkedHashMap<>();
+        variables.put("preserve_interword_spaces", "1");
+        runner.recognize(
+            TESS_DATA,
+            IMAGE,
+            LANGUAGE,
+            false,
+            new OcrOptions(7, variables),
+            reply
+        );
+
+        reply.awaitSuccess();
+        assertEquals(Integer.valueOf(7), api.appliedPageSegMode.get());
+        assertEquals(variables, api.appliedVariables.get());
+    }
+
+    @Test
+    public void noOptionsStillReachTheEngineAsAnEmptyMap() {
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
+
+        reply.awaitSuccess();
+        assertNull(api.appliedPageSegMode.get());
+        assertTrue(api.appliedVariables.get().isEmpty());
+    }
+
+    @Test
     public void everyRecognitionRecyclesItsOwnHandle() {
         api.text = "first";
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
         reply.awaitSuccesses(1);
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
         reply.awaitSuccesses(2);
 
         assertEquals(2, api.recycleCount());
@@ -184,7 +232,7 @@ public class RecognitionRunnerTest {
     public void detachDropsTheReplyOfAnInFlightRecognition() {
         api.releaseRead = new CountDownLatch(1);
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
         assertTrue(api.awaitReadStarted());
 
         runner.stop();
@@ -202,7 +250,7 @@ public class RecognitionRunnerTest {
         runner.stop();
         api.reset();
 
-        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
 
         assertEquals("DETACHED", reply.awaitError());
         assertNull(api.initLanguage.get());
@@ -223,6 +271,9 @@ public class RecognitionRunnerTest {
         final AtomicReference<String> threadName = new AtomicReference<>();
         final AtomicReference<String> initLanguage = new AtomicReference<>();
         final AtomicReference<String> initDataPath = new AtomicReference<>();
+        final AtomicReference<Integer> appliedPageSegMode = new AtomicReference<>();
+        final AtomicReference<Map<String, String>> appliedVariables =
+            new AtomicReference<>();
         final CountDownLatch readEntered = new CountDownLatch(1);
         final AtomicInteger recycleCount = new AtomicInteger();
         final AtomicInteger imageCount = new AtomicInteger();
@@ -236,6 +287,7 @@ public class RecognitionRunnerTest {
         volatile RuntimeException initException;
         volatile RuntimeException setImageFailure;
         volatile RuntimeException readException;
+        volatile RuntimeException optionsFailure;
 
         @Override
         public boolean init(String dataPath, String language) {
@@ -249,6 +301,19 @@ public class RecognitionRunnerTest {
                 throw initException;
             }
             return initResult;
+        }
+
+        @Override
+        public void applyOptions(Integer pageSegMode, Map<String, String> variables) {
+            appliedPageSegMode.set(pageSegMode);
+            appliedVariables.set(
+                variables == null
+                    ? new LinkedHashMap<String, String>()
+                    : new LinkedHashMap<>(variables)
+            );
+            if (optionsFailure != null) {
+                throw optionsFailure;
+            }
         }
 
         @Override
@@ -287,6 +352,8 @@ public class RecognitionRunnerTest {
             imageCount.set(0);
             initLanguage.set(null);
             initDataPath.set(null);
+            appliedPageSegMode.set(null);
+            appliedVariables.set(null);
         }
 
         boolean awaitReadStarted() {

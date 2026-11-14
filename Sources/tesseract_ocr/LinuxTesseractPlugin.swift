@@ -45,10 +45,14 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         }
 
         let language = (args["language"] as? String) ?? "eng"
-        
+
+        let options = args["options"] as? [String: Any]
+            ?? (args["config"] as? [String: Any])?["options"] as? [String: Any]
+
         performLinuxOCR(
             imagePath: imagePath,
             language: language,
+            options: options,
             result: result
         )
     }
@@ -56,6 +60,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     private func performLinuxOCR(
         imagePath: String,
         language: String,
+        options: [String: Any]?,
         result: @escaping FlutterResult
     ) {
         // Validate image path
@@ -130,6 +135,8 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 TessBaseAPIEnd(api)
             }
 
+            Self.applyOptions(to: api, options: options)
+
             // Read image file
             guard let pix = pixRead(imagePath) else {
                 completeOnce(FlutterError(
@@ -184,6 +191,59 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             TessDeleteText(textPtr)
 
             completeOnce(recognizedText)
+        }
+    }
+
+    // MARK: - Options
+
+    /// The key the Dart layer uses for the page segmentation mode.
+    private static let pageSegModeKey = "tessedit_pageseg_mode"
+
+    /// Keys the plugin consumes itself and must never forward as a variable.
+    private static let reservedOptionKeys: Set<String> = [
+        "language",
+        "engine",
+        "tessDataPath",
+        pageSegModeKey,
+    ]
+
+    /// Applies the caller's options to a freshly initialized API.
+    ///
+    /// The page segmentation mode is one call and every other key is a Tesseract
+    /// variable, so a caller's `tessedit_pageseg_mode` reaches the engine as a
+    /// PSM instead of being dropped (issue #59).
+    private static func applyOptions(
+        to api: OpaquePointer?,
+        options: [String: Any]?
+    ) {
+        guard let api = api, let options = options, !options.isEmpty else {
+            return
+        }
+
+        for key in options.keys.sorted() {
+            guard let value = options[key], !(value is NSNull) else { continue }
+            let text = "\(value)"
+
+            if key == pageSegModeKey {
+                guard let mode = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      mode >= 0, mode <= 13,
+                      let psm = TessPageSegMode(rawValue: mode) else {
+                    // An unusable mode keeps the PSM the engine initialized
+                    // with; it is reported rather than silently applied.
+                    print("OCR: ignoring unsupported page segmentation mode: \(text)")
+                    continue
+                }
+                TessBaseAPISetPageSegMode(api, psm)
+                continue
+            }
+
+            if reservedOptionKeys.contains(key) {
+                continue
+            }
+
+            // An unknown variable is the caller's spelling, not a failed
+            // recognition: the return value is deliberately ignored.
+            TessBaseAPISetVariable(api, key, text)
         }
     }
 }

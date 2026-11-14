@@ -2,6 +2,97 @@ import Flutter
 import UIKit
 import Vision
 
+/// The options one recognition call carried, as the Vision engine reads them.
+///
+/// Vision has no Tesseract variable set, so only the options with a Vision
+/// counterpart survive; everything else is reported as ignored rather than
+/// silently accepted (issue #59).
+public struct VisionOcrOptions {
+    /// The `VNRecognizeTextRequest.recognitionLevel` to use.
+    public let recognitionLevel: VNRequestTextRecognitionLevel
+
+    /// Whether Vision applies its language correction.
+    public let usesLanguageCorrection: Bool
+
+    /// The option keys that have no Vision counterpart and were dropped.
+    public let ignoredKeys: [String]
+
+    public static let `default` = VisionOcrOptions(
+        recognitionLevel: .accurate,
+        usesLanguageCorrection: true,
+        ignoredKeys: []
+    )
+
+    /// Reads the option map the Dart layer sends.
+    ///
+    /// A value of the wrong type is reported as ignored instead of being coerced:
+    /// the caller asked for something Vision cannot honour, and guessing a
+    /// boolean from an arbitrary string is how an option silently changes meaning.
+    public static func resolve(_ rawOptions: [String: Any]?) -> VisionOcrOptions {
+        guard let rawOptions = rawOptions, !rawOptions.isEmpty else {
+            return .default
+        }
+
+        var recognitionLevel: VNRequestTextRecognitionLevel = .accurate
+        var usesLanguageCorrection = true
+        var ignoredKeys: [String] = []
+
+        for (key in rawOptions.keys.sorted()) {
+            guard let value = rawOptions[key], !(value is NSNull) else {
+                ignoredKeys.append(key)
+                continue
+            }
+
+            switch key {
+            case "recognition_level":
+                let normalized = "\(value)".trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                switch normalized {
+                case "fast":
+                    recognitionLevel = .fast
+                case "accurate":
+                    recognitionLevel = .accurate
+                default:
+                    // An unknown level keeps Vision's own default, and is not
+                    // silently accepted.
+                    ignoredKeys.append(key)
+                }
+            case "uses_language_correction":
+                guard let parsed = boolValue(value) else {
+                    ignoredKeys.append(key)
+                    continue
+                }
+                usesLanguageCorrection = parsed
+            default:
+                ignoredKeys.append(key)
+            }
+        }
+
+        return VisionOcrOptions(
+            recognitionLevel: recognitionLevel,
+            usesLanguageCorrection: usesLanguageCorrection,
+            ignoredKeys: ignoredKeys
+        )
+    }
+
+    /// The boolean spellings a Dart caller may send across the channel.
+    private static func boolValue(_ value: Any) -> Bool? {
+        if let flag = value as? Bool {
+            return flag
+        }
+        if let number = value as? NSNumber {
+            return number.boolValue
+        }
+        switch "\(value)".trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "true":
+            return true
+        case "false":
+            return false
+        default:
+            return nil
+        }
+    }
+}
+
 public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "tesseract_ocr", binaryMessenger: registrar.messenger())
@@ -23,6 +114,20 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             
             let languageString = (params["language"] as? String) ?? "eng"
             print("OCR: Using language: \(languageString)")
+
+            let options = VisionOcrOptions.resolve(
+                (params["config"] as? [String: Any])?["options"] as? [String: Any]
+                    ?? params["options"] as? [String: Any]
+            )
+            if !options.ignoredKeys.isEmpty {
+                // A dropped option must be visible: the Vision engine has no
+                // Tesseract variable set, so silently accepting it is how a
+                // caller's configuration went missing.
+                print(
+                    "OCR: Vision ignores unsupported option(s): "
+                        + options.ignoredKeys.joined(separator: ", ")
+                )
+            }
             
             guard let imagePath = params["imagePath"] as? String else {
                 result(FlutterError(code: "MISSING_PARAMS", message: "Required parameters missing", details: nil))
@@ -67,10 +172,12 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 result(text)
             }
             
-            // Set recognition level
-            request.recognitionLevel = .accurate
-            
-            // Set language correction to not use it
+            // Recognition level, from the options the caller sent.
+            request.recognitionLevel = options.recognitionLevel
+
+            // Language correction, from the options the caller sent.
+            request.usesLanguageCorrection = options.usesLanguageCorrection
+
             if #available(iOS 16.0, *) {
                 request.automaticallyDetectsLanguage = true
             } else {
