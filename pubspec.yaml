@@ -32,10 +32,14 @@ flutter:
         pluginClass: TesseractOcrPlugin
       ios:
         pluginClass: TesseractOcrPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: TesseractOcrPlugin
+        sharedDarwinSource: true
       web:
         pluginClass: TesseractOcrWeb
         fileName: tesseract_ocr_web.dart
-      macos:
+      linux:
         pluginClass: TesseractOcrPlugin
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

@@ -1,0 +1,6 @@
+module TesseractOcrCpp [system] {
+    header "shim.h"
+    link "tesseract"
+    link "leptonica"
+    export *
+}
