@@ -119,6 +119,9 @@ The plugin will automatically copy these trained data files to the application's
     - assets/tessdata_config.json
     - assets/tessdata/eng.traineddata
   ```
+- A release build only carries the assets your `pubspec.yaml` declares. The plugin
+  refuses to start recognition with an incomplete tessdata set instead of
+  returning garbage — see the error codes below.
 
 ## Common Issues and Solutions
 
@@ -131,6 +134,38 @@ This error typically occurs when:
 - Asset paths in `pubspec.yaml` are not correctly configured
 
 **Solution:** Follow the exact directory structure and configuration shown above.
+
+### `tessdata-config-invalid` / `tessdata-asset-invalid` Errors
+
+`extractText` now refuses to run when the tessdata set it would hand to Tesseract
+is incomplete, instead of letting the engine initialize on an empty or partial
+directory and return garbage. Both are `PlatformException`s whose message names
+the offending asset and the `pubspec.yaml` declaration that carries it.
+
+- `tessdata-config-invalid` — `assets/tessdata_config.json` is not valid JSON, is
+  not an object, or its `files` list is empty. It must be an object with a
+  non-empty `files` array: `{"files": ["eng.traineddata"]}`.
+- `tessdata-asset-invalid` — `assets/tessdata_config.json` is not carried by the
+  bundle, or a `.traineddata` listed in that config is not carried by the
+  bundle, is empty, or is still missing/empty in the tessdata directory after
+  the copy from assets.
+
+**Solution:**
+
+1. Declare the config and every traineddata it lists under `flutter: assets:`
+   in your app's `pubspec.yaml` — individually, if the directory form does not
+   pick them up:
+
+   ```yaml
+   assets:
+     - assets/tessdata_config.json
+     - assets/tessdata/eng.traineddata
+   ```
+
+2. Run `flutter clean && flutter pub get`, then rebuild. Release builds only
+   carry declared assets, so an install that predates a declaration keeps the
+   old, empty tessdata directory — the copy is refreshed when the asset's size
+   differs from the file already on disk.
 
 ### "Unable to load asset" Error
 
