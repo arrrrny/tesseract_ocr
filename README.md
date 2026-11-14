@@ -26,10 +26,11 @@ From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — t
 ## Features
 
 - Perform OCR on images to extract text.
-- Support for multiple OCR engines: Tesseract (Android, iOS, macOS, and Web), Apple Vision (iOS only).
+- Support for multiple OCR engines: Tesseract (Android, iOS, macOS, Linux, and Web), Apple Vision (iOS only).
 - Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
 - Supports the latest Dart and Android SDKs.
-- Includes a custom CocoaPods setup to enable using SwiftyTesseract 4.0.1 on iOS.
+- **Swift Package Manager (SPM) support** for iOS and macOS (recommended)
+- **Linux support** via system tesseract library
 
 ## Getting Started
 
@@ -147,11 +148,26 @@ Some users on M1 Macs may see paths like `assets/tessdata/assets/tessdata/file.t
 
 **Solution:** The plugin automatically handles this, but ensure you're using the latest version.
 
-## iOS Specific Setup (SwiftyTesseract 4.0.1 via Custom CocoaPods)
+## iOS Specific Setup (Swift Package Manager - Recommended)
 
-SwiftyTesseract 4.0.x uses Swift Package Manager and removed CocoaPods support. To allow this plugin to use SwiftyTesseract 4.0.1 via CocoaPods, a custom setup is provided.
+Starting with version 0.5.2+, this plugin uses **Swift Package Manager (SPM)** for iOS, which is the recommended approach going forward.
 
-**Important:** This requires manual steps in your iOS project.
+### SPM Installation (Recommended)
+
+The plugin automatically integrates with SPM when you add it via `pubspec.yaml`. No additional configuration is required.
+
+**Requirements:**
+- iOS 11.0 or later
+- Xcode 12.0 or later
+- Flutter 3.19.0 or later
+
+The plugin uses [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) 4.0.1+ which is automatically fetched and built via SPM.
+
+### Legacy CocoaPods Setup (Deprecated)
+
+> **⚠️ DEPRECATED:** The CocoaPods setup is deprecated and will be removed in a future version. Please migrate to SPM.
+
+For existing projects using CocoaPods, the legacy setup is still available but requires manual steps:
 
 1.  **Download `libtesseract.xcframework`**: SwiftyTesseract 4.0.1 depends on `libtesseract` version 0.2.0, which is also not available on CocoaPods. You need to download the pre-built binary framework. Get `libtesseract.xcframework.zip` for version `0.2.0` from the [libtesseract GitHub Releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0).
 2.  **Extract and Place `libtesseract.xcframework`**: Unzip the downloaded file. Place the resulting `libtesseract.xcframework` folder directly into your Flutter app's **`ios`** directory (the same directory where your main `Podfile` is located).
@@ -220,22 +236,49 @@ Web support uses [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6
 
 ## macOS Setup & Prerequisites
 
-macOS support uses the **Tesseract** engine (`OCREngine.tesseract` / `OCREngine.defaultEngine`). Apple Vision (`OCREngine.vision`) remains iOS-only and is not supported on macOS. Language `.traineddata` files ship in your Flutter app's `assets/tessdata/` directory just like on mobile—no separate per-machine language setup is required for English (`eng`) or other bundled trained data.
+macOS support uses the **Tesseract** engine via **Swift Package Manager (SPM)**. Apple Vision (`OCREngine.vision`) remains iOS-only and is not supported on macOS. Language `.traineddata` files ship in your Flutter app's `assets/tessdata/` directory just like on mobile—no separate per-machine language setup is required for English (`eng`) or other bundled trained data.
 
 ### Prerequisites
 
-1. **Flutter macOS Desktop Support**: Ensure Flutter macOS desktop is enabled (`flutter config --enable-macos-desktop`) along with Xcode and CocoaPods.
-2. **Install Tesseract via Homebrew**:
-   ```bash
-   brew install tesseract
-   ```
-   The plugin automatically discovers `tesseract` in `/opt/homebrew/bin/tesseract` (Apple Silicon), `/usr/local/bin/tesseract` (Intel), `/opt/local/bin/tesseract`, `/usr/bin/tesseract`, `PATH`, or via the `TESSERACT_PATH` environment variable.
-3. **Disable App Sandbox in Your macOS Runner Entitlements**: Because the macOS plugin invokes the installed `tesseract` binary as a subprocess, macOS App Sandbox must be disabled in `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
+1. **Flutter macOS Desktop Support**: Ensure Flutter macOS desktop is enabled (`flutter config --enable-macos-desktop`) along with Xcode 12.0 or later.
+2. **SPM Integration**: The plugin automatically integrates with SPM when added via `pubspec.yaml`. No additional configuration is required.
+3. **App Sandbox Configuration**: If your macOS app uses App Sandbox, you must disable it in `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
    ```xml
    <key>com.apple.security.app-sandbox</key>
    <false/>
    ```
    (This is already configured in `example/macos/Runner/`.)
+
+## Linux Setup & Prerequisites
+
+Linux support uses the **system Tesseract library** installed via your distribution's package manager.
+
+### Prerequisites
+
+1. **Flutter Linux Desktop Support**: Ensure Flutter Linux desktop is enabled (`flutter config --enable-linux-desktop`).
+2. **Install Tesseract and Leptonica**:
+
+   **Ubuntu/Debian:**
+   ```bash
+   sudo apt-get install libtesseract-dev libleptonica-dev
+   ```
+
+   **Fedora/RHEL:**
+   ```bash
+   sudo yum install tesseract-devel leptonica-devel
+   ```
+
+   **Arch Linux:**
+   ```bash
+   sudo pacman -S tesseract leptonica
+   ```
+
+3. **Verify Installation**:
+   ```bash
+   tesseract --version
+   ```
+
+The plugin uses the system Tesseract library directly via C++ interop, providing native performance without bundled binaries.
 
 ## Usage
 
