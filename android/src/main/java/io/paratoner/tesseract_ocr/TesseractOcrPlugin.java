@@ -1,7 +1,5 @@
 package io.paratoner.tesseract_ocr;
 
-import android.os.Handler;
-import android.os.Looper;
 import com.googlecode.tesseract.android.TessBaseAPI;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.MethodCall;
@@ -9,12 +7,13 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import java.io.File;
-
-// Remove: import io.flutter.plugin.common.PluginRegistry.Registrar;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
 
     private MethodChannel channel;
+
+    private RecognitionRunner runner;
 
     @Override
     public void onAttachedToEngine(FlutterPluginBinding flutterPluginBinding) {
@@ -23,19 +22,35 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
             "tesseract_ocr"
         );
         channel.setMethodCallHandler(this);
+        runner = new RecognitionRunner(new TessBaseApiFactory());
     }
 
     @Override
     public void onDetachedFromEngine(FlutterPluginBinding binding) {
+        final RecognitionRunner detached = this.runner;
+        this.runner = null;
+        if (detached != null) {
+            detached.stop();
+        }
         if (channel != null) {
             channel.setMethodCallHandler(null);
             channel = null;
         }
     }
 
-    // Remove the registerWith method
     @Override
     public void onMethodCall(MethodCall call, Result result) {
+        final RecognitionRunner active = this.runner;
+
+        if (active == null) {
+            result.error(
+                "DETACHED",
+                "Tesseract OCR is not attached to the engine.",
+                null
+            );
+            return;
+        }
+
         switch (call.method) {
             case "extractText":
             case "extractHocr":
@@ -62,93 +77,111 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
                     }
                 }
 
-                // Validate tessDataPath is not null
-                if (tessDataPath == null) {
-                    result.error(
-                        "INVALID_ARGUMENT",
-                        "Data path must not be null! Ensure tessdata is properly loaded.",
-                        null
-                    );
-                    return;
-                }
-
-                final String[] recognizedText = new String[1];
-                final TessBaseAPI baseApi = new TessBaseAPI();
-
-                try {
-                    baseApi.init(tessDataPath, DEFAULT_LANGUAGE);
-                    final File tempFile = new File(imagePath);
-                    baseApi.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
-
-                    Thread t = new Thread(
-                        new MyRunnable(
-                            baseApi,
-                            tempFile,
-                            recognizedText,
-                            result,
-                            call.method.equals("extractHocr")
-                        )
-                    );
-                    t.start();
-                } catch (Exception e) {
-                    result.error(
-                        "INIT_ERROR",
-                        "Failed to initialize Tesseract: " + e.getMessage(),
-                        null
-                    );
-                    baseApi.recycle();
-                }
+                active.recognize(
+                    tessDataPath,
+                    imagePath,
+                    DEFAULT_LANGUAGE,
+                    call.method.equals("extractHocr"),
+                    new MethodChannelReply(result)
+                );
                 break;
             default:
                 result.notImplemented();
         }
     }
-}
 
-class MyRunnable implements Runnable {
+    /** Delivers one reply, and only one, to the calling Dart side. */
+    private static final class MethodChannelReply implements RecognitionRunner.Reply {
 
-    private TessBaseAPI baseApi;
-    private File tempFile;
-    private String[] recognizedText;
-    private Result result;
-    private boolean isHocr;
+        private final Result result;
 
-    public MyRunnable(
-        TessBaseAPI baseApi,
-        File tempFile,
-        String[] recognizedText,
-        Result result,
-        boolean isHocr
-    ) {
-        this.baseApi = baseApi;
-        this.tempFile = tempFile;
-        this.recognizedText = recognizedText;
-        this.result = result;
-        this.isHocr = isHocr;
-    }
+        private final AtomicBoolean delivered = new AtomicBoolean();
 
-    @Override
-    public void run() {
-        this.baseApi.setImage(this.tempFile);
-        if (isHocr) {
-            recognizedText[0] = this.baseApi.getHOCRText(0);
-        } else {
-            recognizedText[0] = this.baseApi.getUTF8Text();
+        MethodChannelReply(Result result) {
+            this.result = result;
         }
-        this.baseApi.recycle();
-        this.sendSuccess(recognizedText[0]);
+
+        @Override
+        public void success(Object value) {
+            if (!delivered.compareAndSet(false, true)) {
+                return;
+            }
+            result.success(value);
+        }
+
+        @Override
+        public void error(String code, String message, Object details) {
+            if (!delivered.compareAndSet(false, true)) {
+                return;
+            }
+            result.error(code, message, details);
+        }
     }
 
-    public void sendSuccess(String msg) {
-        final String str = msg;
-        final Result res = this.result;
-        new Handler(Looper.getMainLooper()).post(
-            new Runnable() {
-                @Override
-                public void run() {
-                    res.success(str);
-                }
+    /** Adapts a native {@link TessBaseAPI} handle to {@link NativeOcrApi}. */
+    private static final class TessBaseApiFactory implements RecognitionRunner.ApiFactory {
+
+        @Override
+        public NativeOcrApi create() {
+            return new TessBaseApiHandle(new TessBaseAPI());
+        }
+    }
+
+    private static final class TessBaseApiHandle implements NativeOcrApi {
+
+        private TessBaseAPI api;
+
+        TessBaseApiHandle(TessBaseAPI api) {
+            this.api = api;
+        }
+
+        @Override
+        public boolean init(String dataPath, String language) {
+            final TessBaseAPI handle = this.api;
+            if (handle == null) {
+                return false;
             }
-        );
+            if (!handle.init(dataPath, language)) {
+                return false;
+            }
+            handle.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
+            return true;
+        }
+
+        @Override
+        public void setImage(File image) {
+            require().setImage(image);
+        }
+
+        @Override
+        public String getUtf8Text() {
+            return require().getUTF8Text();
+        }
+
+        @Override
+        public String getHocrText() {
+            return require().getHOCRText(0);
+        }
+
+        @Override
+        public void recycle() {
+            final TessBaseAPI handle = this.api;
+            // Cleared before the native call so a second recycle can never double free.
+            this.api = null;
+            if (handle == null) {
+                return;
+            }
+            handle.recycle();
+        }
+
+        private TessBaseAPI require() {
+            final TessBaseAPI handle = this.api;
+            if (handle == null) {
+                throw new IllegalStateException(
+                    "TessBaseAPI has already been recycled."
+                );
+            }
+            return handle;
+        }
     }
 }
