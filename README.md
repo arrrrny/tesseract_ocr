@@ -119,6 +119,9 @@ The plugin will automatically copy these trained data files to the application's
     - assets/tessdata_config.json
     - assets/tessdata/eng.traineddata
   ```
+- A release build only carries the assets your `pubspec.yaml` declares. The plugin
+  refuses to start recognition with an incomplete tessdata set instead of
+  returning garbage — see the error codes below.
 
 ## Common Issues and Solutions
 
@@ -131,6 +134,42 @@ This error typically occurs when:
 - Asset paths in `pubspec.yaml` are not correctly configured
 
 **Solution:** Follow the exact directory structure and configuration shown above.
+
+### `tessdata-config-invalid` / `tessdata-asset-invalid` Errors
+
+`extractText` now refuses to run when the tessdata set it would hand to Tesseract
+is incomplete, instead of letting the engine initialize on an empty or partial
+directory and return garbage. Both are `PlatformException`s whose message names
+the offending asset and the `pubspec.yaml` declaration that carries it.
+
+- `tessdata-config-invalid` — `assets/tessdata_config.json` is not valid JSON, is
+  not an object, does not carry a non-empty `files` array, or lists an entry that
+  is not a flat `.traineddata` file name (a path such as `sub/eng.traineddata`,
+  or an entry that is not a string, is a config mistake). It must be an object
+  with a non-empty `files` array: `{"files": ["eng.traineddata"]}`.
+- `tessdata-asset-invalid` — `assets/tessdata_config.json` is not carried by the
+  bundle, or a `.traineddata` listed in that config is not carried by the bundle,
+  is empty, or differs from the file already on disk (missing, truncated, or
+  replaced by another build) and cannot be rewritten.
+
+**Solution:**
+
+1. Declare the config and every traineddata it lists under `flutter: assets:`
+   in your app's `pubspec.yaml` — individually, if the directory form does not
+   pick them up:
+
+   ```yaml
+   assets:
+     - assets/tessdata_config.json
+     - assets/tessdata/eng.traineddata
+   ```
+
+2. Run `flutter clean && flutter pub get`, then rebuild. Release builds only
+   carry declared assets, so an install that predates a declaration keeps the
+   old, empty tessdata directory — the copy is refreshed whenever the asset's
+   contents differ from the file already on disk, so a same-size file from an
+   older build is replaced too. Assets are read once per app run, so the copy
+   check costs one read per declared file rather than one per `extractText` call.
 
 ### "Unable to load asset" Error
 
