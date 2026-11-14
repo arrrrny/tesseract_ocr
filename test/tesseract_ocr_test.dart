@@ -76,14 +76,23 @@ void main() {
     );
   });
 
-  test('pubspec.yaml registers ios with sharedDarwinSource', () async {
+  test('pubspec.yaml registers ios as a supported plugin platform', () async {
     final pubspec = await File('pubspec.yaml').readAsString();
     expect(pubspec, contains('ios:'));
     expect(
       pubspec,
+      matches(RegExp(r'ios:\s*\n\s*pluginClass:\s*TesseractOcrPlugin')),
+    );
+  });
+
+  test('pubspec.yaml declares sharedDarwinSource for the shared Apple source',
+      () async {
+    final pubspec = await File('pubspec.yaml').readAsString();
+    expect(
+      pubspec,
       matches(
         RegExp(
-          r'ios:\s*\n\s*pluginClass:\s*TesseractOcrPlugin\s*\n\s*sharedDarwinSource:\s*true',
+          r'macos:\s*\n\s*pluginClass:\s*TesseractOcrPlugin\s*\n\s*sharedDarwinSource:\s*true',
         ),
       ),
     );

@@ -7,21 +7,28 @@ on:
     branches: [ master, development ]
 
 jobs:
-  # Real build gate for the Apple (SwiftPM) path. The substring tests in
-  # test/tesseract_ocr_test.dart cannot fail on a tree that does not compile
-  # (they only read the Swift file as text), so this is the step that actually
-  # catches a broken plugin source.
+  # Real compile gate for the Apple (SwiftPM) path. `swift build` cannot be used:
+  # the SwiftPM target compiles Sources/tesseract_ocr/*.swift, which is a Flutter
+  # plugin and imports Flutter — a module plain SwiftPM has no way to resolve, so
+  # the step died with `no such module 'Flutter'` before reaching any of our code.
+  # The plugin is really compiled by CocoaPods inside the host app, so the gate
+  # compiles exactly that: a `pod lib lint` of the iOS podspec, which builds the
+  # shared Sources/ file against the real Flutter + SwiftyTesseract401 pods. The
+  # substring tests in test/tesseract_ocr_test.dart only read the Swift source as
+  # text; this is the step that catches a plugin source that does not compile.
   swift-build:
-    name: swift build (macOS)
+    name: pod lib lint (iOS)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
-      - name: swift build
-        run: swift build
-      - name: swift build (release)
-        run: swift build -c release
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: pod lib lint --swift-version=5.3 tesseract_ocr.podspec
+        working-directory: ios
+        run: pod lib lint tesseract_ocr.podspec --swift-version=5.3 --allow-warnings --verbose
 
   # Dart/flutter side of the plugin.
   dart:
@@ -29,9 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
-      - run: dart pub get
-      - run: dart analyze
-      - run: dart test
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test --concurrency=2
