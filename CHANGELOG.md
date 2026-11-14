@@ -1,3 +1,10 @@
+## 0.6.0
+
+*   **Android native lifecycle hardening:** recognitions now run on a single daemon thread that owns the native handle and releases it in a `finally`, so a detached engine can no longer NPE or double free
+*   A missing or unusable tessdata directory is reported as `INIT_ERROR` again (it was surfacing as `RECOGNITION_ERROR`)
+*   The recognition intake is bounded: a caller that queues faster than OCR completes gets `BUSY` instead of unbounded pending futures
+*   All native failures — `Error`s included — are answered through the method channel instead of reaching the host process
+
 ## 0.5.0
 
 *   **BREAKING CHANGE FIX:** Fixed parameter compatibility between Dart and Android plugin that was causing "Data path must not be null!" errors

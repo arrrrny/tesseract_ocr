@@ -1,9 +1,10 @@
 package io.paratoner.tesseract_ocr;
 
 import java.io.File;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -25,11 +26,22 @@ class RecognitionRunner {
 
     private static final String THREAD_NAME = "tesseract-ocr-recognition";
 
+    static final String BUSY = "BUSY";
     static final String DETACHED = "DETACHED";
     static final String INVALID_ARGUMENT = "INVALID_ARGUMENT";
     static final String INIT_ERROR = "INIT_ERROR";
     static final String NATIVE_ERROR = "NATIVE_ERROR";
     static final String RECOGNITION_ERROR = "RECOGNITION_ERROR";
+
+    /**
+     * How many recognitions may wait for the worker thread.
+     *
+     * <p>An unbounded intake lets a caller that scans faster than OCR completes
+     * park one full {@code init()} — a language-model load — per queued item,
+     * each with a pending Dart future and no timeout. A full queue is answered
+     * with {@link #BUSY} instead.
+     */
+    static final int MAX_QUEUED_RECOGNITIONS = 4;
 
     /** The reply channel of one recognition. */
     interface Reply {
@@ -45,12 +57,18 @@ class RecognitionRunner {
 
     private final ApiFactory factory;
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(
+    private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>(MAX_QUEUED_RECOGNITIONS),
         command -> {
             final Thread thread = new Thread(command, THREAD_NAME);
             thread.setDaemon(true);
             return thread;
-        }
+        },
+        new ThreadPoolExecutor.AbortPolicy()
     );
 
     private final AtomicBoolean attached = new AtomicBoolean(true);
@@ -114,10 +132,20 @@ class RecognitionRunner {
                     )
             );
         } catch (RejectedExecutionException e) {
-            // Detached between the check above and the submission.
+            // Either detached between the check above and the submission, or the
+            // intake is saturated. A saturated runner is busy, not gone: only a
+            // refusal from a shut-down executor means the engine left.
+            if (!attached.get()) {
+                reply.error(
+                    DETACHED,
+                    "Tesseract OCR has been detached from the engine.",
+                    null
+                );
+                return;
+            }
             reply.error(
-                DETACHED,
-                "Tesseract OCR has been detached from the engine.",
+                BUSY,
+                "Tesseract is still recognizing earlier images. Try again.",
                 null
             );
         }
@@ -142,17 +170,33 @@ class RecognitionRunner {
                 return;
             }
 
-            if (!baseApi.init(tessDataPath, language)) {
+            try {
+                if (!baseApi.init(tessDataPath, language)) {
+                    reply.error(
+                        INIT_ERROR,
+                        "Failed to initialize Tesseract for language '"
+                            + language
+                            + "'. Ensure the tessdata files are bundled.",
+                        null
+                    );
+                    return;
+                }
+            } catch (IllegalArgumentException e) {
+                // The adapter's init rejects an unusable datapath or language by
+                // throwing rather than returning false, and that is still a
+                // failed init: a caller switching on INIT_ERROR for "tessdata
+                // missing" must keep seeing it.
                 reply.error(
                     INIT_ERROR,
                     "Failed to initialize Tesseract for language '"
                         + language
-                        + "'. Ensure the tessdata files are bundled.",
+                        + "'. Ensure the tessdata files are bundled. ("
+                        + e.getMessage()
+                        + ")",
                     null
                 );
                 return;
             }
-
             baseApi.setImage(image);
             final String recognizedText = hocr
                 ? baseApi.getHocrText()

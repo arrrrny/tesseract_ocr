@@ -7,8 +7,9 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -103,13 +104,47 @@ public class RecognitionRunnerTest {
     }
 
     @Test
-    public void nativeLoadingFailureIsReportedAsANativeError() {
+    public void initThrowsAnErrorIsReportedAsANativeError() {
         api.initFailure = new UnsatisfiedLinkError("libtesseract.so missing");
 
         runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
 
         assertEquals("NATIVE_ERROR", reply.awaitError());
         assertEquals(1, api.recycleCount());
+    }
+
+    @Test
+    public void missingTessdataIsReportedAsAnInitErrorNotARecognitionError() {
+        // TessBaseAPI.init rejects a bad datapath by throwing IllegalArgumentException
+        // rather than returning false, which is the case the review flagged: it must
+        // still arrive as INIT_ERROR, not RECOGNITION_ERROR.
+        api.initException = new IllegalArgumentException(
+            "Data path must contain subfolder tessdata!"
+        );
+
+        runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+
+        assertEquals("INIT_ERROR", reply.awaitError());
+        assertTrue(reply.lastErrorMessage().contains("tessdata"));
+        assertEquals(1, api.recycleCount());
+        assertEquals(0, api.imageCount());
+    }
+
+    @Test
+    public void aSaturatedIntakeIsAnsweredAsBusyInsteadOfDetached() {
+        api.releaseRead = new CountDownLatch(1);
+
+        // One recognition runs, the intake holds its bound, the rest are refused.
+        for (int i = 0; i <= RecognitionRunner.MAX_QUEUED_RECOGNITIONS + 1; i++) {
+            runner.recognize(TESS_DATA, IMAGE, LANGUAGE, false, reply);
+        }
+        assertTrue(api.awaitReadStarted());
+
+        assertEquals(1, reply.errorCount());
+        assertEquals("BUSY", reply.lastErrorCode());
+
+        api.releaseRead.countDown();
+        assertEquals(0, reply.successCount());
     }
 
     @Test
@@ -188,7 +223,6 @@ public class RecognitionRunnerTest {
         final AtomicReference<String> threadName = new AtomicReference<>();
         final AtomicReference<String> initLanguage = new AtomicReference<>();
         final AtomicReference<String> initDataPath = new AtomicReference<>();
-        final List<String> calls = new ArrayList<>();
         final CountDownLatch readEntered = new CountDownLatch(1);
         final AtomicInteger recycleCount = new AtomicInteger();
         final AtomicInteger imageCount = new AtomicInteger();
@@ -199,23 +233,30 @@ public class RecognitionRunnerTest {
         volatile String hocrText = "";
         volatile RuntimeException readFailure;
         volatile Error initFailure;
+        volatile RuntimeException initException;
+        volatile RuntimeException setImageFailure;
+        volatile RuntimeException readException;
 
         @Override
         public boolean init(String dataPath, String language) {
-            calls.add("init");
             threadName.compareAndSet(null, Thread.currentThread().getName());
             initDataPath.set(dataPath);
             initLanguage.set(language);
             if (initFailure != null) {
                 throw initFailure;
             }
+            if (initException != null) {
+                throw initException;
+            }
             return initResult;
         }
 
         @Override
         public void setImage(File image) {
-            calls.add("setImage");
             imageCount.incrementAndGet();
+            if (setImageFailure != null) {
+                throw setImageFailure;
+            }
         }
 
         @Override
@@ -230,7 +271,6 @@ public class RecognitionRunnerTest {
 
         @Override
         public void recycle() {
-            calls.add("recycle");
             recycleCount.incrementAndGet();
         }
 
@@ -243,7 +283,6 @@ public class RecognitionRunnerTest {
         }
 
         void reset() {
-            calls.clear();
             recycleCount.set(0);
             imageCount.set(0);
             initLanguage.set(null);
@@ -289,14 +328,18 @@ public class RecognitionRunnerTest {
             if (readFailure != null) {
                 throw readFailure;
             }
+            if (readException != null) {
+                throw readException;
+            }
             return hocr ? hocrText : text;
         }
     }
 
     private static final class RecordingReply implements RecognitionRunner.Reply {
 
-        private final List<String> errors = new ArrayList<>();
+        private final List<String> errors = new CopyOnWriteArrayList<>();
         private final AtomicInteger successCount = new AtomicInteger();
+        private final AtomicInteger errorCount = new AtomicInteger();
         private volatile Object lastSuccess;
 
         @Override
@@ -307,11 +350,15 @@ public class RecognitionRunnerTest {
 
         @Override
         public void error(String code, String message, Object details) {
+            // Written on the recognition thread and read by the test thread: the
+            // list and the counter publish through thread-safe types, so the spin
+            // below observes the reply instead of timing out on a loaded machine.
             errors.add(code + ": " + message);
+            errorCount.incrementAndGet();
         }
 
         int errorCount() {
-            return errors.size();
+            return errorCount.get();
         }
 
         int successCount() {
@@ -350,7 +397,7 @@ public class RecognitionRunnerTest {
         private void awaitDelivery(int expectedSuccesses) {
             final long deadline = System.nanoTime()
                 + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS);
-            while (successCount.get() < expectedSuccesses && errors.isEmpty()) {
+            while (successCount.get() < expectedSuccesses && errorCount.get() == 0) {
                 if (System.nanoTime() > deadline) {
                     fail(
                         "fewer than " + expectedSuccesses + " replies within "
