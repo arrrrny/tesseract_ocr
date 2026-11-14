@@ -76,6 +76,39 @@ void main() {
     );
   });
 
+  test('pubspec.yaml registers ios with sharedDarwinSource', () async {
+    final pubspec = await File('pubspec.yaml').readAsString();
+    expect(pubspec, contains('ios:'));
+    expect(
+      pubspec,
+      matches(
+        RegExp(
+          r'ios:\s*\n\s*pluginClass:\s*TesseractOcrPlugin\s*\n\s*sharedDarwinSource:\s*true',
+        ),
+      ),
+    );
+  });
+
+  test('Package.swift declares SwiftyTesseract dependency for Apple platforms',
+      () async {
+    final packageSwift = await File('Package.swift').readAsString();
+    expect(packageSwift, contains('https://github.com/SwiftyTesseract/SwiftyTesseract.git'));
+    expect(packageSwift, contains('.product(name: "SwiftyTesseract", package: "SwiftyTesseract")'));
+  });
+
+  test('iOS Swift plugin validates tessData directory and traineddata files before initializing Tesseract',
+      () async {
+    final swiftSource = await File('Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift').readAsString();
+    expect(
+      swiftSource,
+      contains('func validateTessData'),
+    );
+    expect(
+      swiftSource,
+      contains('TESSDATA_NOT_FOUND'),
+    );
+  });
+
   test('extractText throws ArgumentError on IO when image file is missing',
       () async {
     final missingPath = '${tempDir.path}/does_not_exist.png';
