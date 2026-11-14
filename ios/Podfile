@@ -32,9 +32,11 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-  
-  # Add SwiftyTesseract 4.0.1 directly from GitHub since it's not available on CocoaPods
-  pod 'SwiftyTesseract', :git => 'https://github.com/SwiftyTesseract/SwiftyTesseract.git', :tag => '4.0.1'
+
+  # SwiftyTesseract 4.0.1 dropped its CocoaPods support upstream, so the custom
+  # podspec in this directory is the only way to resolve it.
+  pod 'SwiftyTesseract401', :podspec => File.join(File.dirname(__FILE__), 'SwiftyTesseract401.podspec')
+  pod 'libtesseract', :path => File.dirname(__FILE__)
 end
 
 post_install do |installer|

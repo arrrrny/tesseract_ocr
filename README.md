@@ -169,21 +169,22 @@ The plugin uses [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesse
 
 For existing projects using CocoaPods, the legacy setup is still available but requires manual steps:
 
-1.  **Download `libtesseract.xcframework`**: SwiftyTesseract 4.0.1 depends on `libtesseract` version 0.2.0, which is also not available on CocoaPods. You need to download the pre-built binary framework. Get `libtesseract.xcframework.zip` for version `0.2.0` from the [libtesseract GitHub Releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0).
-2.  **Extract and Place `libtesseract.xcframework`**: Unzip the downloaded file. Place the resulting `libtesseract.xcframework` folder directly into your Flutter app's **`ios`** directory (the same directory where your main `Podfile` is located).
+1.  **Download `libtesseract.xcframework`**: SwiftyTesseract 4.0.1 depends on `libtesseract` version 0.2.0, which is also not available on CocoaPods. You need to download the pre-built binary framework. Get `libtesseract-0.2.0.xcframework.zip` from the [libtesseract GitHub Releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0).
+2.  **Extract and Place `libtesseract.xcframework`**: Unzip the downloaded file. Place the resulting `libtesseract.xcframework` folder directly into the **plugin's** `ios` directory — the directory that contains `libtesseract.podspec` — **not** into your app's `ios` directory.
 
-    Your app's `ios` directory structure should look like this:
+    The plugin's pod is consumed by `:path` from its own `ios` directory, and `libtesseract.podspec` resolves the xcframework relative to itself. So the binary must sit beside the podspec:
 
     ```
-    your_flutter_app/ios/
-    ├── Runner.xcodeproj
-    ├── Runner.xcworkspace
-    ├── Podfile         <-- Your main Podfile
-    ├── libtesseract.xcframework  <-- Place the extracted folder here
-    └── ... (other iOS files)
+    .symlinks/plugins/tesseract_ocr/ios/
+    ├── libtesseract.podspec          <-- The podspec that consumes it
+    ├── libtesseract.xcframework      <-- Place the extracted folder here
+    ├── SwiftyTesseract401.podspec
+    └── tesseract_ocr.podspec
     ```
 
-3.  **Configure Your App's Podfile**: In your Flutter app's `ios/Podfile`, you need to reference the custom podspecs provided within the `tesseract_ocr` plugin using the `:path` option.
+    Your app's own `ios` directory keeps only the usual Flutter files (`Runner.xcodeproj`, `Runner.xcworkspace`, `Podfile`) — the xcframework does not belong there.
+
+3.  **Configure Your App's Podfile**: In your Flutter app's `ios/Podfile`, you need to reference the custom podspecs provided within the `tesseract_ocr` plugin: `SwiftyTesseract401` by `:podspec`, `libtesseract` by `:path`. No `EXCLUDED_ARCHS` entry is needed — the arm64 Apple Silicon simulator slice builds on its own.
 
     Locate your `target 'Runner'` block and add the following lines:
 
@@ -202,7 +203,7 @@ For existing projects using CocoaPods, the legacy setup is still available but r
       # Add the custom SwiftyTesseract401 and libtesseract pods
       # These paths are relative from YOUR app's ios directory to the plugin's ios directory
       # Adjust the '../../.symlinks/plugins/tesseract_ocr/ios' path if necessary
-      pod 'SwiftyTesseract401', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
+      pod 'SwiftyTesseract401', :podspec => '../../.symlinks/plugins/tesseract_ocr/ios/SwiftyTesseract401.podspec'
       pod 'libtesseract', :path => '../../.symlinks/plugins/tesseract_ocr/ios'
 
 
