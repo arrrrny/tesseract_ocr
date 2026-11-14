@@ -31,6 +31,12 @@ class TesseractConfig {
 
   /// Path to a debug output file
   static const String debugFile = 'debug_file';
+
+  /// Apple Vision recognition level (iOS only): `fast` or `accurate`
+  static const String recognitionLevel = 'recognition_level';
+
+  /// Apple Vision language correction (iOS only): `true` or `false`
+  static const String usesLanguageCorrection = 'uses_language_correction';
 }
 
 /// Page Segmentation Modes for Tesseract

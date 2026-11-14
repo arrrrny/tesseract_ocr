@@ -189,11 +189,11 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
 
     let mergedOptions = collectOptions(params: params, config: config)
     for key in mergedOptions.keys.sorted() {
-      guard let rawValue = mergedOptions[key] else { continue }
+      guard let rawValue = mergedOptions[key], !(rawValue is NSNull) else { continue }
       let value = "\(rawValue)"
-      if key == "tessedit_pageseg_mode" {
+      if key == Self.pageSegModeKey {
         arguments.append(contentsOf: ["--psm", value])
-      } else if key == "tessedit_ocr_engine_mode" {
+      } else if key == Self.ocrEngineModeKey {
         arguments.append(contentsOf: ["--oem", value])
       } else {
         arguments.append(contentsOf: ["-c", "\(key)=\(value)"])
@@ -374,21 +374,38 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
     return nil
   }
 
+  // MARK: - Shared option names
+
+  /// The OCR engine mode (OEM). Applied through its own call on Android and as
+  /// `--oem` here, never as a `-c` variable.
+  static let ocrEngineModeKey = "tessedit_ocr_engine_mode"
+
+  /// The page segmentation mode (PSM).
+  static let pageSegModeKey = "tessedit_pageseg_mode"
+
+  /// Keys this plugin applies itself and must never forward as a variable.
+  static let reservedOptionKeys: Set<String> = [
+    "language",
+    "engine",
+    "tessDataPath",
+    pageSegModeKey,
+    ocrEngineModeKey,
+  ]
+
   private func collectOptions(
     params: [String: Any],
     config: [String: Any]?
   ) -> [String: Any] {
-    let reservedKeys: Set<String> = ["language", "engine", "tessDataPath"]
     var collected: [String: Any] = [:]
 
     if let config = config {
-      for (key, value) in config where !reservedKeys.contains(key) {
+      for (key, value) in config where !Self.reservedOptionKeys.contains(key) {
         collected[key] = value
       }
     }
 
     if let options = params["options"] as? [String: Any] {
-      for (key, value) in options where !reservedKeys.contains(key) {
+      for (key, value) in options where !Self.reservedOptionKeys.contains(key) {
         collected[key] = value
       }
     }

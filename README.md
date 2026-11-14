@@ -382,9 +382,10 @@ The `OCRConfig` class allows detailed configuration of the OCR process:
 - `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
 - `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS; Tesseract on Android, macOS, and Web).
 - `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
-- `options` (Map<String, dynamic>?): A map of additional configuration options.
-  - For the **Tesseract** engine, these are passed directly to the Tesseract API. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings.
-  - For the **Vision** engine (iOS), limited options might be supported depending on the native implementation (currently, primarily language hint via `language`).
+- `options` (Map<String, dynamic>?): A map of additional configuration options. Which keys each platform honours:
+  - **Android, macOS, Linux and Web (Tesseract engine):** passed to the Tesseract engine. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings. `tessedit_pageseg_mode` selects the page segmentation mode and `tessedit_ocr_engine_mode` the engine mode; every other key is set as a Tesseract variable.
+  - **iOS (Vision engine):** Vision has no Tesseract variable set. `TesseractConfig.recognitionLevel` (`'fast'` or `'accurate'`, default `'accurate'`) and `TesseractConfig.usesLanguageCorrection` (`true` or `false`, default `true`) are honoured; any other key is logged as ignored rather than silently accepted.
+  - A value a platform cannot apply is dropped and logged, never guessed: an unsupported page segmentation mode keeps the engine default, and an unparsable boolean keeps Vision's default.
 
 See `ocr_engine_config.dart` for the `OCREngine`, `TesseractConfig`, and `PageSegmentationMode` enums and classes.
 

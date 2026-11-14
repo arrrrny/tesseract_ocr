@@ -7,6 +7,7 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import java.io.File;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
@@ -82,12 +83,35 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
                     imagePath,
                     DEFAULT_LANGUAGE,
                     call.method.equals("extractHocr"),
+                    OcrOptions.from(readOptions(call)),
                     new MethodChannelReply(result)
                 );
                 break;
             default:
                 result.notImplemented();
         }
+    }
+
+    /**
+     * The {@code options} map the Dart layer sent, or null when it sent none.
+     *
+     * <p>The map arrives as {@code Map<Object, Object>} on the channel, and a
+     * malformed one is treated as absent rather than failing the recognition: an
+     * option the caller could not spell must not cost them the OCR run.
+     */
+    private static java.util.Map<String, Object> readOptions(MethodCall call) {
+        final Object raw = call.argument("options");
+        if (!(raw instanceof java.util.Map)) {
+            return null;
+        }
+        final java.util.Map<?, ?> map = (java.util.Map<?, ?>) raw;
+        final java.util.Map<String, Object> options = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
+            if (entry.getKey() instanceof String) {
+                options.put((String) entry.getKey(), entry.getValue());
+            }
+        }
+        return options;
     }
 
     /** Delivers one reply, and only one, to the calling Dart side. */
@@ -144,8 +168,27 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
             if (!handle.init(dataPath, language)) {
                 return false;
             }
+            // The engine's own default. A caller that asked for a mode replaces
+            // it in applyOptions, which runs immediately after a successful init.
             handle.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);
             return true;
+        }
+
+        @Override
+        public void applyOptions(Integer pageSegMode, Map<String, String> variables) {
+            final TessBaseAPI handle = require();
+            if (pageSegMode != null) {
+                // PageSegMode's constants ARE the tesseract PSM integers
+                // (PSM_RAW_LINE == 13) and setPageSegMode takes the int, so the
+                // value OcrOptions bounded to 0..13 passes straight through —
+                // no enum lookup whose ordinal order could drift.
+                handle.setPageSegMode(pageSegMode);
+            }
+            for (Map.Entry<String, String> variable : variables.entrySet()) {
+                // An unknown variable is the caller's spelling, not a failed
+                // recognition: skip it and keep the rest.
+                handle.setVariable(variable.getKey(), variable.getValue());
+            }
         }
 
         @Override
