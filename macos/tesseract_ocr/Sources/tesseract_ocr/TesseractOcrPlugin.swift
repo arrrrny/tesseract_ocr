@@ -19,9 +19,28 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       result("macOS " + ProcessInfo.processInfo.operatingSystemVersionString)
     case "extractText", "extractHocr":
       handleExtract(call: call, isHocr: call.method == "extractHocr", result: result)
+    case "detectOrientationScript":
+      handleDetectOrientationScript(result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  /// Orientation & script detection is answered explicitly rather than falling
+  /// through to `FlutterMethodNotImplemented`: this plugin drives the
+  /// `tesseract` command-line executable, which cannot return the structured
+  /// OSD result the channel contract carries (the iOS plugin reads it from the
+  /// bundled libtesseract). A macOS caller gets a clear unsupported error
+  /// instead of a `MissingPluginException`.
+  private func handleDetectOrientationScript(result: @escaping FlutterResult) {
+    result(
+      FlutterError(
+        code: "UNSUPPORTED_OSD",
+        message:
+          "Orientation & script detection is not supported on macOS: this plugin drives the tesseract executable, which cannot return the structured OSD result. Run OSD on iOS, Linux or Web.",
+        details: nil
+      )
+    )
   }
 
   private func handleExtract(

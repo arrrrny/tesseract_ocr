@@ -1,3 +1,10 @@
+## Unreleased
+
+*   **OSD (orientation & script detection) API (issue #54):** `TesseractOcr.detectOrientationAndScript(imagePath, config:)` returns an `OsdResult` (page rotation, writing script, a confidence for each) mirroring `pytesseract.image_to_osd`. iOS and Linux run the native detector, Web runs tesseract.js `worker.detect()`, and Android/macOS answer an explicit `UNSUPPORTED_OSD` instead of a `MissingPluginException`
+*   **OSD honours `OCRConfig.options` and a 30s watchdog on Apple:** the iOS OSD path applies the caller's Tesseract variables through the same coercion the OCR path uses, and arms the same 30s timeout — a hung decode answers `OSD_TIMEOUT` instead of parking the caller's future forever
+*   **OSD language defaults to `osd` everywhere:** a call that names no language runs on the `osd` model on iOS, Linux and Web alike (the Linux handler previously fell back to `eng`, whose LSTM-only traineddata carries no legacy templates and fails detection); an explicit `OCRConfig(language:)` is honoured as given
+*   **Web OSD rejects unusable image paths:** a path that is neither a bundled asset nor a direct web input (blob:, data:, http(s)://) fails with `INVALID_IMAGE_INPUT` instead of being silently fetched relative to the page URL; a non-finite confidence from any engine coerces to the defaults rather than surfacing `NaN`/`Infinity`
+
 ## 0.6.1
 
 *   **hOCR output support (issue #53):** a new `TesseractOcr.extractHocr(imagePath, config:)` returns layout-aware hOCR (bounding boxes per word/line) alongside the plain-text `extractText`, sharing the same signature, options and validation. It is served by the Tesseract engine on Android, Web, macOS, iOS and Linux: the iOS Swift plugin and the Linux C++ plugin now honour the `extractHocr` channel method, and requesting hOCR with `OCREngine.vision` throws `UnsupportedError` (Vision produces no hOCR)

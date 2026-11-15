@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tesseract_ocr/ocr_engine_config.dart';
+import 'package:tesseract_ocr/osd_result.dart';
 import 'package:tesseract_ocr/src/io_helper.dart' as io_helper;
+
+export 'osd_result.dart';
 
 class TesseractOcr {
   static const String TESS_DATA_CONFIG = 'assets/tessdata_config.json';
@@ -160,5 +163,93 @@ class TesseractOcr {
       args,
     );
     return extracted ?? '';
+  }
+
+  /// Detects the orientation and script of [imagePath] with Tesseract's OSD
+  /// (orientation & script detection).
+  ///
+  /// Mirrors `pytesseract.image_to_osd`: the returned [OsdResult] carries the
+  /// page rotation in [OsdResult.orientationDegrees] (rotate the image by that
+  /// many degrees to make it upright), the detected writing script in
+  /// [OsdResult.scriptName], and a confidence for each. Use it to auto-rotate or
+  /// decline an image before running [extractText].
+  ///
+  /// OSD is a Tesseract engine capability; [OCREngine.vision] has no equivalent
+  /// and is rejected. Detection classifies with the legacy templates carried by
+  /// the `osd` model, so a call that names no language defaults to `osd` —
+  /// bundle `osd.traineddata` for script-agnostic detection. Android and macOS
+  /// answer `UNSUPPORTED_OSD` (see the README's platform matrix).
+  ///
+  /// [OCRConfig.options] travel with the call and are applied by the engines
+  /// that accept Tesseract variables (iOS, Linux, Web); an explicit
+  /// [OCRConfig.language] is honoured as given on every platform.
+  static Future<OsdResult> detectOrientationAndScript(
+    String imagePath, {
+    OCRConfig? config,
+  }) async {
+    if (imagePath.trim().isEmpty) {
+      throw ArgumentError.value(imagePath, 'imagePath', 'Must not be empty');
+    }
+
+    final actualConfig = config ?? const OCRConfig();
+
+    if (actualConfig.engine == OCREngine.vision) {
+      throw UnsupportedError(
+        'OSD is only available with the Tesseract engine. '
+        'OCREngine.vision does not expose orientation & script detection.',
+      );
+    }
+
+    if (!_isWeb) {
+      if (!await io_helper.fileExists(imagePath)) {
+        throw ArgumentError.value(
+          imagePath,
+          'imagePath',
+          'Image file does not exist',
+        );
+      }
+    }
+
+    String? tessDataPath;
+    if (actualConfig.tessDataPath != null) {
+      tessDataPath = actualConfig.tessDataPath;
+    } else if (!_isWeb) {
+      tessDataPath = await io_helper.loadTessDataToAppDocuments(
+        TESS_DATA_CONFIG,
+        TESS_DATA_PATH,
+      );
+    }
+
+    // OSD classifies with the legacy templates of the `osd` model, so a call
+    // that names no language runs on `osd` rather than the OCR default `eng`
+    // (whose LSTM-only traineddata carries no legacy templates and would
+    // answer TESSDATA_NOT_FOUND). An explicit language is honoured as given.
+    final String language =
+        (config == null || actualConfig.language.trim().isEmpty)
+            ? 'osd'
+            : actualConfig.language.trim();
+
+    final Map<String, dynamic> args = {
+      'imagePath': imagePath,
+      'tessData': tessDataPath,
+      'language': language,
+      'engine': actualConfig.engine.toString().split('.').last,
+      if (actualConfig.options != null) 'options': actualConfig.options,
+    };
+
+    final Map<String, dynamic>? result =
+        await _channel.invokeMapMethod<String, dynamic>(
+      'detectOrientationScript',
+      args,
+    );
+
+    if (result == null) {
+      throw PlatformException(
+        code: 'OSD_NO_RESULT',
+        message: 'Orientation & script detection returned no result.',
+      );
+    }
+
+    return OsdResult.fromMap(result);
   }
 }

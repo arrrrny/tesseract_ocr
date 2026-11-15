@@ -398,6 +398,26 @@ Future<void> _performOcr(String imagePath) async {
 }
 ```
 
+### Orientation & script detection (OSD)
+
+`TesseractOcr.detectOrientationAndScript` mirrors `pytesseract.image_to_osd`: it returns an `OsdResult` carrying the page rotation (`orientationDegrees`, rotate the image by it to make it upright), the detected writing script (`scriptName`), and a confidence for each. Use it to auto-rotate or decline an image before running `extractText`.
+
+```dart
+final osd = await TesseractOcr.detectOrientationAndScript(
+  imagePath,
+  config: const OCRConfig(language: 'osd'), // needs osd.traineddata
+);
+print('Rotate by ${osd.orientationDegrees}°, script: ${osd.scriptName}');
+```
+
+OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`).
+
+**Language default:** detection classifies with the legacy templates of the `osd` model, so a call that names no language (`config` omitted or no `language` set on the web/Linux/Apple handlers) runs on `osd` — the OCR default `eng` carries no legacy templates and would answer `TESSDATA_NOT_FOUND`. An explicit `OCRConfig(language: ...)` is honoured as given.
+
+**Options:** `OCRConfig.options` travel with the call and are applied by the engines that accept Tesseract variables (iOS, Linux, Web); `tessedit_pageseg_mode` becomes `--psm` on Linux, `setVariable`/`setParameters` elsewhere.
+
+**Platform matrix:** iOS and Linux run the native detector (30s watchdog, `OSD_TIMEOUT` on a hung decode); Web runs tesseract.js `worker.detect()`; **Android answers `UNSUPPORTED_OSD`** (the bundled tesseract4android 4.8.0 binding exposes no OSD result API) and **macOS answers `UNSUPPORTED_OSD`** too (the macOS plugin drives the `tesseract` executable, which cannot return the structured OSD result) — both instead of a `MissingPluginException`.
+
 ### Extracting hOCR (layout-aware output)
 
 Alongside plain text, the plugin can return **hOCR** — an HTML-like, layout-aware

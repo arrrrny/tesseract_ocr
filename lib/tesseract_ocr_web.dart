@@ -37,6 +37,8 @@ class TesseractOcrWeb {
           call.arguments,
           isHocr: call.method == 'extractHocr',
         );
+      case 'detectOrientationScript':
+        return _detectOrientationScript(call.arguments);
       default:
         throw PlatformException(
           code: 'Unimplemented',
@@ -176,6 +178,142 @@ class TesseractOcrWeb {
     }
   }
 
+  /// Detects orientation & script through tesseract.js's `worker.detect()`.
+  ///
+  /// `detect()` returns `{ data: { script, script_confidence,
+  /// orientation_degrees, orientation_confidence, ... } }`; this maps that onto
+  /// the same four keys the native engines answer with.
+  Future<Map<String, dynamic>> _detectOrientationScript(
+    dynamic arguments,
+  ) async {
+    if (arguments is! Map) {
+      throw PlatformException(
+        code: 'INVALID_ARGUMENTS',
+        message: 'Arguments were invalid or could not be parsed.',
+      );
+    }
+
+    final params = Map<String, dynamic>.from(arguments);
+    final engine = params['engine']?.toString().toLowerCase();
+    if (engine == 'vision') {
+      throw PlatformException(
+        code: 'UNSUPPORTED_ENGINE',
+        message:
+            'Apple Vision engine does not support OSD. Use OCREngine.tesseract or OCREngine.defaultEngine on Web.',
+      );
+    }
+
+    final rawImagePath = params['imagePath']?.toString().trim() ?? '';
+    if (rawImagePath.isEmpty) {
+      throw PlatformException(
+        code: 'MISSING_PARAMS',
+        message: "Required parameter 'imagePath' is missing.",
+      );
+    }
+
+    // Orientation & script detection runs on the OSD model; fall back to it
+    // when the caller did not name a language, mirroring the native engines.
+    final rawLanguage = params['language']?.toString().trim() ?? '';
+    final language = rawLanguage.isEmpty ? 'osd' : rawLanguage;
+
+    final rawTessData = params['tessData']?.toString().trim();
+    if (rawTessData == null || rawTessData.isEmpty) {
+      await _verifyBundledTrainedData(language);
+    }
+
+    final rawOptions = params['options'];
+    final options =
+        rawOptions is Map ? Map<String, dynamic>.from(rawOptions) : null;
+
+    final langPath = TesseractWebHelper.resolveLangPath(
+      baseUri: Uri.base,
+      overridePath: rawTessData,
+    );
+
+    // A path that is neither a bundled asset nor a direct web input fails
+    // loudly here instead of being silently resolved against the page URL:
+    // that fetch would usually return a 404 page, and OSD — whose whole point
+    // is deciding whether to accept an image — would report a baffling decode
+    // failure rather than a bad input.
+    final JSAny imageInput = await _resolveOsdImageInput(rawImagePath);
+
+    await _ensureTesseractLoaded();
+
+    final tesseractObj = globalContext['Tesseract'] as JSObject?;
+    if (tesseractObj == null) {
+      throw PlatformException(
+        code: 'TESSERACT_JS_NOT_AVAILABLE',
+        message: 'window.Tesseract is not available after script load.',
+      );
+    }
+
+    // OSD classifies with the legacy engine's templates, so the worker is
+    // created with the legacy core/lang enabled regardless of the OCR OEM.
+    final workerOptions = <String, Object?>{
+      'langPath': langPath,
+      'gzip': false,
+      'legacyCore': true,
+      'legacyLang': true,
+    }.jsify()!;
+
+    JSObject? worker;
+    try {
+      final workerPromise = tesseractObj.callMethodVarArgs<JSPromise<JSObject>>(
+        'createWorker'.toJS,
+        <JSAny?>[
+          language.toJS,
+          1.toJS,
+          workerOptions,
+        ],
+      );
+      worker = await workerPromise.toDart;
+
+      // The caller's Tesseract variables reach the OSD worker the same way the
+      // OCR path applies them; the worker is created with the legacy core/lang
+      // regardless, since detection classifies through the legacy templates.
+      final runtimeOptions = TesseractWebHelper.filterRuntimeOptions(options);
+      if (runtimeOptions.isNotEmpty) {
+        final setParamsPromise = worker.callMethodVarArgs<JSPromise<JSAny?>>(
+          'setParameters'.toJS,
+          <JSAny?>[runtimeOptions.jsify()!],
+        );
+        await setParamsPromise.toDart;
+      }
+
+      final detectPromise = worker.callMethodVarArgs<JSPromise<JSObject>>(
+        'detect'.toJS,
+        <JSAny?>[imageInput],
+      );
+      final resultObj = await detectPromise.toDart;
+      final dataObj = resultObj['data'] as JSObject?;
+
+      return <String, dynamic>{
+        'orientation':
+            (dataObj?['orientation_degrees'] as JSNumber?)?.toDartInt ?? 0,
+        'orientation_conf':
+            (dataObj?['orientation_confidence'] as JSNumber?)?.toDartDouble ??
+                0.0,
+        'script': (dataObj?['script'] as JSString?)?.toDart ?? '',
+        'script_conf':
+            (dataObj?['script_confidence'] as JSNumber?)?.toDartDouble ?? 0.0,
+      };
+    } catch (error) {
+      if (error is PlatformException) rethrow;
+      throw PlatformException(
+        code: 'OCR_PROCESS_ERROR',
+        message: 'tesseract.js OSD detection failed: $error',
+      );
+    } finally {
+      if (worker != null) {
+        try {
+          await worker.callMethod<JSPromise<JSAny?>>('terminate'.toJS).toDart;
+        } catch (_) {
+          // Ignore worker cleanup errors.
+        }
+      }
+    }
+  }
+
   Future<void> _verifyBundledTrainedData(String language) async {
     final languageParts = language
         .split('+')
@@ -226,6 +364,34 @@ class TesseractOcrWeb {
       return bytes.toJS;
     } catch (_) {
       return Uri.base.resolve(imagePath).toString().toJS;
+    }
+  }
+
+  /// The OSD variant of [_resolveImageInput]: a path that is neither a direct
+  /// web input nor a bundled asset is rejected instead of being fetched
+  /// relative to the page URL, so a typo'd asset path surfaces as a clear
+  /// argument error rather than as a decode failure over a 404 page. The OCR
+  /// path keeps the historical page-URL fallback for its served-image callers.
+  Future<JSAny> _resolveOsdImageInput(String imagePath) async {
+    if (TesseractWebHelper.isDirectWebImageInput(imagePath)) {
+      return imagePath.toJS;
+    }
+
+    try {
+      final ByteData data = await rootBundle.load(imagePath);
+      final Uint8List bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      return bytes.toJS;
+    } catch (_) {
+      throw PlatformException(
+        code: 'INVALID_IMAGE_INPUT',
+        message:
+            "'$imagePath' is neither a bundled asset nor a direct web input "
+            '(blob:, data:, http://, https://). Bundle the file as a Flutter '
+            'asset or pass an absolute URL.',
+      );
     }
   }
 
