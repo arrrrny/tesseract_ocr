@@ -47,7 +47,7 @@ public struct VisionOcrOptions {
         var usesLanguageCorrection = true
         var ignoredKeys: [String] = []
 
-        for (key in rawOptions.keys.sorted()) {
+        for key in rawOptions.keys.sorted() {
             guard let value = rawOptions[key], !(value is NSNull) else {
                 ignoredKeys.append(key)
                 continue
