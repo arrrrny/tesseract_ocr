@@ -126,6 +126,49 @@ The plugin will automatically copy these trained data files to the application's
   refuses to start recognition with an incomplete tessdata set instead of
   returning garbage — see the error codes below.
 
+### Load Trained Data From a Device Directory (No Asset Copy)
+
+Bundling `.traineddata` as Flutter assets is not the only option. When the
+language packs are already on the device — downloaded at runtime, unpacked from a
+downloaded archive, or shared by another app — point recognition at that
+directory and the asset copy step is skipped entirely:
+
+```dart
+final config = OCRConfig(
+  language: 'eng',
+  engine: OCREngine.tesseract,
+  tessDataPath: '/storage/emulated/0/Download/tesseract/tessdata',
+);
+final text = await TesseractOcr.extractText(imagePath, config: config);
+```
+
+The directory is read as-is, in either layout:
+
+```text
+<your-directory>/eng.traineddata           # the files directly in it
+<your-directory>/tessdata/eng.traineddata # or in a tessdata subdirectory
+```
+
+This is the flow for large language packs and download-on-demand: nothing is
+written to the app's documents directory, and the first recognition can start as
+soon as the download finishes.
+
+On Android the engine reads its data from `<datapath>/tessdata/<lang>.traineddata`
+only, so the file-holding directory has to be named `tessdata` there: point
+`tessDataPath` at the directory that carries the `tessdata` subdirectory (as in
+the example above), or at a `tessdata` directory holding the files directly. A
+direct layout under any other name is refused with `tessdata-path-invalid`
+instead of an init failure inside the engine. iOS and macOS read the
+file-holding directory itself, so both layouts work as documented.
+
+The directory is validated before the engine is asked to read it. A path that is
+missing, is not a directory, or does not carry every `.traineddata` the requested
+`language` needs raises a `PlatformException` with code `tessdata-path-invalid`
+naming the directory and the missing file(s) — see the error codes below.
+
+`tessDataPath` applies to the Tesseract engine only: `OCREngine.vision` reads no
+`.traineddata` at all, so the override is ignored there.
+
 ## Common Issues and Solutions
 
 ### "Data path must not be null!" Error
@@ -137,6 +180,22 @@ This error typically occurs when:
 - Asset paths in `pubspec.yaml` are not correctly configured
 
 **Solution:** Follow the exact directory structure and configuration shown above.
+
+### `tessdata-path-invalid` Error
+
+A `tessDataPath` you passed does not name a tessdata directory the engine can
+read: it is missing, it is not a directory, it does not hold every
+`.traineddata` the requested `language` needs (`eng.traineddata` for `'eng'`, and
+both `eng.traineddata` and `deu.traineddata` for `'eng+deu'`), or a needed
+`.traineddata` is empty (0 bytes — where a truncated download lands). On Android
+the file-holding directory also has to be named `tessdata` (see above). The
+message names the directory, the offending file(s), and both layouts it accepts.
+
+**Solution:** download the missing `.traineddata` file(s) into that directory (the
+[`tessdata_fast`](https://github.com/tesseract-ocr/tessdata_fast) set is the
+smallest), delete and re-download a 0-byte one, point `tessDataPath` at a
+directory the engine can read, or drop the override to fall back to the bundled
+`assets/tessdata/` set.
 
 ### `tessdata-config-invalid` / `tessdata-asset-invalid` Errors
 
@@ -491,7 +550,7 @@ The `OCRConfig` class allows detailed configuration of the OCR process:
 
 - `language` (String): The language code (e.g., 'eng', 'fas'). Required for the Tesseract engine, usually corresponds to the `.traineddata` file prefix. Can be used as a hint for the Vision engine. Defaults to 'eng'.
 - `engine` (`OCREngine`): The OCR engine to use (`OCREngine.vision`, `OCREngine.tesseract`, or `OCREngine.defaultEngine`). Defaults to `OCREngine.defaultEngine` (Vision on iOS; Tesseract on Android, macOS, and Web).
-- `tessDataPath` (String?): **Internal Use.** The plugin automatically handles loading tessdata from assets; you typically don't need to set this.
+- `tessDataPath` (String?): A tessdata directory **already on the device** — a downloaded language pack, unpacked archive, or shared storage. Set it and the asset copy is skipped: the engine is pointed at that directory, which must hold `<lang>.traineddata` directly or under a `tessdata/` subdirectory, or recognition is refused with `tessdata-path-invalid`. Ignored by `OCREngine.vision`, which reads no `.traineddata`. On Web it is the `langPath` URL the Tesseract.js worker loads from. Leave it unset to use the bundled `assets/tessdata/` set.
 - `options` (Map<String, dynamic>?): A map of additional configuration options. Which keys each platform honours:
   - **Android, macOS, Linux and Web (Tesseract engine):** passed to the Tesseract engine. Use keys from `TesseractConfig` or any valid Tesseract configuration variable name (e.g., `'preserve_interword_spaces'`, `'tessedit_pageseg_mode'`). Values should be strings. `tessedit_pageseg_mode` selects the page segmentation mode and `tessedit_ocr_engine_mode` the engine mode; every other key is set as a Tesseract variable.
   - **iOS (Vision engine):** Vision has no Tesseract variable set. `TesseractConfig.recognitionLevel` (`'fast'` or `'accurate'`, default `'accurate'`) and `TesseractConfig.usesLanguageCorrection` (`true` or `false`, default `true`) are honoured; any other key is logged as ignored rather than silently accepted.

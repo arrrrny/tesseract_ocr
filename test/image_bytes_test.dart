@@ -133,6 +133,11 @@ void main() {
         () async {
       final String customTessData = '${tempDir.path}/custom_tessdata';
       await Directory(customTessData).create(recursive: true);
+      // A device tessdata directory is the download-on-demand layout of #56:
+      // the files are already there, so no asset copy runs and the directory
+      // the engine is pointed at is the one that holds them.
+      await File('$customTessData/eng.traineddata')
+          .writeAsBytes(<int>[1, 2, 3, 4]);
 
       final String result = await TesseractOcr.extractTextFromBytes(
         imageBytes,

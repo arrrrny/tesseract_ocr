@@ -8,6 +8,99 @@ import 'package:tesseract_ocr/src/tessdata_assets.dart';
 
 Future<bool> fileExists(String path) => File(path).exists();
 
+/// Resolves a caller-supplied tessdata directory to the directory that holds the
+/// requested languages' `.traineddata` (issue #56).
+///
+/// A download-on-demand flow points recognition at a directory already on the
+/// device, and that directory comes in either layout: the `.traineddata` files
+/// sit in it directly, or it is a parent carrying the `tessdata/`
+/// subdirectory the bundled asset copy produces. Both resolve to the directory
+/// that holds the files, and each platform's bridge points its engine there —
+/// Android's additionally reads `<datapath>/tessdata/` only, so it refuses a
+/// direct-layout directory that is not itself named `tessdata`.
+///
+/// Anything else throws [PlatformException] naming [path]: the native engine's
+/// own `TESSDATA_NOT_FOUND` sends the caller back to declaring Flutter assets,
+/// which is exactly the step this flow exists to skip.
+Future<String> resolveTessDataDirectory(
+  String path, {
+  required String language,
+}) async {
+  final String trimmed = path.trim();
+  final List<String> parts = TessDataAssets.languageParts(language);
+  final List<String> wanted = (parts.isEmpty ? <String>['eng'] : parts)
+      .map(TessDataAssets.trainedDataFile)
+      .toList(growable: false);
+
+  // Wanted files seen with no bytes: a truncated download sits under its own
+  // name, so the actionable answer is "empty", not "missing".
+  final Set<String> emptyFiles = <String>{};
+
+  if (trimmed.isNotEmpty) {
+    for (final String candidate in <String>[
+      trimmed,
+      join(trimmed, TessDataAssets.tessdataDirectoryName),
+    ]) {
+      final Map<String, int>? present = await _trainedDataFiles(candidate);
+      if (present == null) continue;
+      final bool complete = wanted.every(present.containsKey);
+      if (!complete) continue;
+      final List<String> empty = wanted
+          .where((String name) => present[name] == 0)
+          .toList(growable: false);
+      if (empty.isEmpty) return candidate;
+      emptyFiles.addAll(empty);
+    }
+  }
+
+  if (emptyFiles.isNotEmpty) {
+    throw TessDataAssets.emptyFilesException(
+      path: trimmed,
+      files: emptyFiles.toList(growable: false),
+    );
+  }
+  throw TessDataAssets.pathException(
+    path: trimmed,
+    language: language,
+    missingFiles: wanted,
+  );
+}
+
+/// The `.traineddata` files in directory [path] as `name → byte length`, or
+/// null when [path] is not a directory this isolate can list.
+///
+/// A null return is "no such directory", never an error to raise: a missing
+/// directory and a directory without the file are the same actionable outcome,
+/// and only one of them is worth a stack trace.
+///
+/// Entries are judged by what they point at, not by how they list: a symlink
+/// to a `.traineddata` file (an extracted pack may use symlinks) lists as a
+/// link and stat resolves it to the file it points at, while a directory and a
+/// broken link do not stat as files. The listing itself stays
+/// `followLinks: false` so a broken link is one skipped entry instead of an
+/// error the whole listing dies on.
+Future<Map<String, int>?> _trainedDataFiles(String path) async {
+  final Directory directory = Directory(path);
+  try {
+    final FileStat stats = await directory.stat();
+    if (stats.type != FileSystemEntityType.directory) return null;
+    final Map<String, int> files = <String, int>{};
+    await for (final FileSystemEntity entity in directory.list(
+      followLinks: false,
+    )) {
+      final FileStat stat = await FileStat.stat(entity.path);
+      if (stat.type != FileSystemEntityType.file) continue;
+      final String name = basename(entity.path);
+      if (name.endsWith(TessDataAssets.trainedDataExtension)) {
+        files[name] = stat.size;
+      }
+    }
+    return files;
+  } on Object {
+    return null;
+  }
+}
+
 /// The tessdata set this isolate already resolved from the asset bundle.
 ///
 /// Asset bytes are immutable for the life of a process and
@@ -59,9 +152,8 @@ Future<String?> loadTessDataToAppDocuments(
     for (int i = 0; i < resolved.fileNames.length; i++) {
       final String fileName = resolved.fileNames[i];
       final File destFile = File(join(tessdataDirectory.path, fileName));
-      final Uint8List? destinationBytes = await destFile.exists()
-          ? await destFile.readAsBytes()
-          : null;
+      final Uint8List? destinationBytes =
+          await destFile.exists() ? await destFile.readAsBytes() : null;
       if (!TessDataAssets.needsCopy(
         assetBytes: resolved.assets[i],
         knownLength: null,

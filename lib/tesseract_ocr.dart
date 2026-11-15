@@ -139,8 +139,20 @@ class TesseractOcr {
 
     String? tessDataPath;
     if (actualConfig.engine != OCREngine.vision) {
-      if (actualConfig.tessDataPath != null) {
-        tessDataPath = actualConfig.tessDataPath;
+      final String configured = actualConfig.tessDataPath?.trim() ?? '';
+      if (configured.isNotEmpty) {
+        // A tessdata directory already on the device — downloaded at runtime or
+        // shared with another app — replaces the asset copy entirely (issue
+        // #56): the engine is pointed at where the files actually are, and a
+        // directory without them is refused here instead of inside the engine.
+        // On Web there is no filesystem to check: the override is the `langPath`
+        // the Tesseract.js worker fetches from, so it travels untouched.
+        tessDataPath = _isWeb
+            ? configured
+            : await io_helper.resolveTessDataDirectory(
+                configured,
+                language: actualConfig.language,
+              );
       } else if (!_isWeb) {
         tessDataPath = await io_helper.loadTessDataToAppDocuments(
           TESS_DATA_CONFIG,

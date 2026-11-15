@@ -34,6 +34,17 @@ class RecognitionRunner {
     static final String RECOGNITION_ERROR = "RECOGNITION_ERROR";
 
     /**
+     * A tessdata path the Android engine cannot read. Not UPPER_SNAKE like the
+     * codes above on purpose: it is the same {@code tessdata-path-invalid} code
+     * the Dart resolver refuses an unusable directory with, so a caller of
+     * {@code extractText} switches on one code for every tessdata refusal.
+     */
+    static final String TESSDATA_PATH_INVALID = "tessdata-path-invalid";
+
+    /** The subdirectory name {@code TessBaseAPI.init} reads its data from. */
+    private static final String TESSDATA_DIRECTORY_NAME = "tessdata";
+
+    /**
      * How many recognitions may wait for the worker thread.
      *
      * <p>An unbounded intake lets a caller that scans faster than OCR completes
@@ -201,6 +212,27 @@ class RecognitionRunner {
     ) {
         NativeOcrApi baseApi = null;
         try {
+            final String dataPath = dataPathFor(tessDataPath);
+            if (dataPath == null) {
+                // A direct-layout directory (files not under a directory named
+                // "tessdata") has no datapath the engine can read: refusing it
+                // here keeps the failure actionable and the engine untouched,
+                // where taking the parent would have init read a tessdata set
+                // that does not exist (issue #56 review).
+                reply.error(
+                    TESSDATA_PATH_INVALID,
+                    "Tesseract tessdata directory '"
+                        + tessDataPath
+                        + "' holds the .traineddata files directly but is not "
+                        + "named 'tessdata'. On Android the engine reads "
+                        + "<datapath>/tessdata/<lang>.traineddata, so pass the "
+                        + "directory that holds a tessdata subdirectory (or "
+                        + "name this directory tessdata).",
+                    null
+                );
+                return;
+            }
+
             baseApi = factory.create();
             if (baseApi == null) {
                 reply.error(
@@ -212,7 +244,7 @@ class RecognitionRunner {
             }
 
             try {
-                if (!baseApi.init(tessDataPath, language)) {
+                if (!baseApi.init(dataPath, language)) {
                     reply.error(
                         INIT_ERROR,
                         "Failed to initialize Tesseract for language '"
@@ -292,5 +324,51 @@ class RecognitionRunner {
         } catch (Throwable ignored) {
             // Releasing a broken handle must not mask the recognition result.
         }
+    }
+
+    /**
+     * The datapath {@link NativeOcrApi#init} expects for {@code tessDataPath},
+     * or {@code null} when {@code tessDataPath} names a tessdata directory this
+     * engine cannot read.
+     *
+     * <p>{@code TessBaseAPI.init} reads {@code <datapath>/tessdata/<lang>.traineddata},
+     * while every other platform of this plugin reads the directory that holds
+     * the {@code .traineddata} files itself — and that is the shape a caller
+     * pointing recognition at a directory on the device hands us (issue #56: a
+     * downloaded or shared tessdata directory, with no asset copy step). A
+     * directory named {@code tessdata} is therefore resolved to its parent, and
+     * a path that is already a datapath (the bundled asset copy's layout) is
+     * passed through untouched.
+     *
+     * <p>What has no datapath is the <i>direct</i> layout — the files sitting in
+     * a directory <i>not</i> named {@code tessdata}: the parent's
+     * {@code tessdata/} does not hold them, and the engine reads nothing else,
+     * so taking the parent would send init after a file that does not exist.
+     * Such a directory resolves to {@code null} and the caller is refused with
+     * {@link #TESSDATA_PATH_INVALID} instead of left to an opaque init failure.
+     * iOS and macOS pass the file-holding directory to the engine directly, so
+     * the same directory is fine there.
+     */
+    static String dataPathFor(String tessDataPath) {
+        final File directory = new File(tessDataPath);
+        if (!holdsTrainedData(directory)) {
+            return tessDataPath;
+        }
+        if (!TESSDATA_DIRECTORY_NAME.equals(directory.getName())) {
+            // Direct layout: the files are here, but the engine only ever reads
+            // <datapath>/tessdata/<lang>.traineddata — the parent is not it.
+            return null;
+        }
+        final String parent = directory.getParent();
+        // A tessdata directory at the filesystem root has no parent to report.
+        return parent == null ? tessDataPath : parent;
+    }
+
+    /** Whether {@code directory} holds at least one {@code .traineddata} file. */
+    private static boolean holdsTrainedData(File directory) {
+        final File[] trainedData = directory.listFiles(
+            (File file) -> file.isFile()
+                && file.getName().endsWith(".traineddata"));
+        return trainedData != null && trainedData.length > 0;
     }
 }

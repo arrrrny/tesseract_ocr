@@ -19,6 +19,87 @@ class TessDataAssets {
   /// A declared `.traineddata` is absent from the bundle, or carries no bytes.
   static const String invalidAssetCode = 'tessdata-asset-invalid';
 
+  /// A caller-supplied tessdata directory holds no `.traineddata` for the
+  /// requested language.
+  ///
+  /// Distinct from [invalidAssetCode]: the bundle is not involved at all here,
+  /// so the actionable fix is to put the file on the device — not to declare an
+  /// asset.
+  static const String invalidPathCode = 'tessdata-path-invalid';
+
+  /// The subdirectory a tessdata parent keeps its `.traineddata` files in.
+  static const String tessdataDirectoryName = 'tessdata';
+
+  /// The extension every traineddata file carries.
+  static const String trainedDataExtension = '.traineddata';
+
+  /// The `+`-separated language parts of a Tesseract language string.
+  ///
+  /// `'eng+deu'` asks the engine for two traineddata files, so every part has to
+  /// resolve before a tessdata directory can be called usable.
+  static List<String> languageParts(String language) {
+    return language
+        .split('+')
+        .map((String part) => part.trim())
+        .where((String part) => part.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  /// The `.traineddata` file name of [languagePart].
+  static String trainedDataFile(String languagePart) {
+    return '$languagePart$trainedDataExtension';
+  }
+
+  /// Thrown when [path] is not a tessdata directory the engine can read.
+  ///
+  /// [missingFiles] is the set the request needs, whether the directory was
+  /// absent or merely incomplete: the caller's next step is the same either way.
+  static PlatformException pathException({
+    required String path,
+    required String language,
+    required List<String> missingFiles,
+  }) {
+    final List<String> parts = languageParts(language);
+    final String example = parts.isEmpty ? 'eng' : parts.first;
+    return PlatformException(
+      code: invalidPathCode,
+      message: 'Cannot load Tesseract tessdata: "$path" holds no '
+          'traineddata file for language "$language" '
+          '(missing ${missingFiles.join(', ')}).\n'
+          'Tesseract reads a directory of .traineddata files, either '
+          'directly:\n'
+          '  $path/$example$trainedDataExtension\n'
+          'or under a "$tessdataDirectoryName" subdirectory:\n'
+          '  $path/$tessdataDirectoryName/$example$trainedDataExtension\n'
+          'Download the missing .traineddata file(s) into that directory '
+          '(e.g. from github.com/tesseract-ocr/tessdata_fast) and pass it as '
+          'OCRConfig(tessDataPath: ...), or drop the override to use the '
+          'bundled assets/tessdata/ set.',
+    );
+  }
+
+  /// Thrown when a `.traineddata` the request needs is present in [path] but
+  /// carries no bytes.
+  ///
+  /// Distinct from [pathException]: the file is there under its own name, so
+  /// "download the missing files" would be the wrong instruction — a truncated
+  /// download sits exactly here and has to be deleted and fetched again.
+  static PlatformException emptyFilesException({
+    required String path,
+    required List<String> files,
+  }) {
+    return PlatformException(
+      code: invalidPathCode,
+      message: 'Cannot load Tesseract tessdata: "$path" holds an empty '
+          '.traineddata file the requested language needs '
+          '(${files.join(', ')} — 0 bytes).\n'
+          'A truncated download lands exactly here: delete the listed '
+          '.traineddata file(s) and download them again (e.g. from '
+          'github.com/tesseract-ocr/tessdata_fast), or drop the override to '
+          'use the bundled assets/tessdata/ set.',
+    );
+  }
+
   /// Parses the `files` list out of `tessdata_config.json`.
   static List<String> parseFileNames(
     String configJson, {

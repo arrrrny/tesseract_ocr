@@ -156,6 +156,80 @@ public class RecognitionRunnerTest {
         assertEquals(0, api.imageCount());
     }
 
+    /**
+     * A tessdata directory on the device (issue #56) is resolved to the datapath
+     * {@code TessBaseAPI.init} reads, while a datapath is passed through: the two
+     * layouts differ by one path segment, and the engine only accepts one.
+     */
+    @Test
+    public void aTessdataDirectoryIsResolvedToItsParentForInit() throws Exception {
+        final File root = temporaryDirectory();
+        final File tessdata = new File(root, "tessdata");
+        assertTrue(tessdata.mkdirs());
+        assertTrue(new File(tessdata, "eng.traineddata").createNewFile());
+
+        assertEquals(root.getPath(), RecognitionRunner.dataPathFor(tessdata.getPath()));
+    }
+
+    @Test
+    public void aDataPathIsPassedThroughUnchanged() throws Exception {
+        final File root = temporaryDirectory();
+        final File tessdata = new File(root, "tessdata");
+        assertTrue(tessdata.mkdirs());
+        assertTrue(new File(tessdata, "eng.traineddata").createNewFile());
+
+        assertEquals(root.getPath(), RecognitionRunner.dataPathFor(root.getPath()));
+    }
+
+    @Test
+    public void aPathWithNoTrainedDataIsPassedThroughForTheEngineToJudge() {
+        assertEquals(
+            TESS_DATA,
+            RecognitionRunner.dataPathFor(TESS_DATA)
+        );
+    }
+
+    /**
+     * The direct layout — files in a directory not named "tessdata" — has no
+     * datapath the engine can read (issue #56 review): the parent's
+     * {@code tessdata/} does not hold the files, and {@code TessBaseAPI.init}
+     * reads nothing else. Taking the parent anyway would point the engine at a
+     * tessdata set that does not exist.
+     */
+    @Test
+    public void aDirectLayoutDirectoryHasNoDatapathTheEngineCanRead() throws Exception {
+        final File root = temporaryDirectory();
+        final File direct = new File(root, "tessfiles");
+        assertTrue(direct.mkdirs());
+        assertTrue(new File(direct, "eng.traineddata").createNewFile());
+
+        assertNull(RecognitionRunner.dataPathFor(direct.getPath()));
+    }
+
+    /** The refused direct layout never reaches the engine at all. */
+    @Test
+    public void aDirectLayoutTessdataDirectoryIsRefusedBeforeTheEngine() throws Exception {
+        final File root = temporaryDirectory();
+        final File direct = new File(root, "tessfiles");
+        assertTrue(direct.mkdirs());
+        assertTrue(new File(direct, "eng.traineddata").createNewFile());
+
+        runner.recognize(direct.getPath(), IMAGE, LANGUAGE, false, OcrOptions.NONE, reply);
+
+        assertEquals(RecognitionRunner.TESSDATA_PATH_INVALID, reply.awaitError());
+        assertNull(api.initDataPath.get());
+        assertEquals(0, api.recycleCount());
+        assertEquals(0, api.imageCount());
+    }
+
+    private static File temporaryDirectory() throws Exception {
+        final File root = File.createTempFile("tessdata_runner_", "");
+        assertTrue(root.delete());
+        assertTrue(root.mkdirs());
+        root.deleteOnExit();
+        return root;
+    }
+
     @Test
     public void failedRecognitionIsReportedInsteadOfCrashing() {
         api.readFailure = new IllegalStateException("native read failed");
