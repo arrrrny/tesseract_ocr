@@ -82,7 +82,25 @@ set(_tesseract_bundled_dlls "")
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
   pkg_check_modules(TESSERACT QUIET IMPORTED_TARGET tesseract)
+  # Both leptonica spellings are in the wild: the vcpkg port and MSYS2 export
+  # lept.pc, other distributions ship leptonica.pc. A port that spells it
+  # differently from the one probed here must not read as "not installed".
   pkg_check_modules(LEPTONICA QUIET IMPORTED_TARGET lept)
+  if(NOT LEPTONICA_FOUND)
+    pkg_check_modules(LEPTONICA QUIET IMPORTED_TARGET leptonica)
+  endif()
+endif()
+
+if(TESSERACT_FOUND OR LEPTONICA_FOUND)
+  if(NOT TESSERACT_FOUND OR NOT LEPTONICA_FOUND)
+    # A half-found pkg-config falls through to the prefix probe below — but it
+    # must be named, or the FATAL_ERROR at the bottom reads as "the packages
+    # the user just installed are missing".
+    message(STATUS
+      "tesseract_ocr: pkg-config resolved tesseract=${TESSERACT_FOUND} "
+      "leptonica=${LEPTONICA_FOUND}; also probing the TESSERACT_ROOT / "
+      "install-prefix layout")
+  endif()
 endif()
 
 if(TESSERACT_FOUND AND LEPTONICA_FOUND)
@@ -107,6 +125,15 @@ if(TESSERACT_FOUND AND LEPTONICA_FOUND)
       file(GLOB _pkg_config_dlls "${_dll_dir}/*.dll")
       list(APPEND _tesseract_bundled_dlls ${_pkg_config_dlls})
     endforeach()
+  endif()
+  if(NOT _tesseract_bundled_dlls)
+    # An empty bundle configures successfully and produces exactly the plugin
+    # DLL that fails to load at runtime — the failure the FATAL_ERROR below
+    # exists to prevent — so it must be named here, at configure time.
+    message(WARNING
+      "tesseract_ocr: pkg-config resolved tesseract but no DLLs were found in "
+      "the library directories it named; the plugin will fail to load at "
+      "runtime. Check TESSERACT_PREFIX or install the runtime DLLs.")
   endif()
   message(STATUS "tesseract_ocr: using the pkg-config tesseract "
                  "(libdirs: ${_pkg_config_dll_dirs})")

@@ -2,6 +2,67 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+/// Strips string literals, char literals and comments from a C++ source so a
+/// character count below sees only code — a stray `}` inside a message string
+/// must not cancel a missing one in the code around it.
+String stripNonCode(String source) {
+  final StringBuffer out = StringBuffer();
+  var inString = false;
+  var inChar = false;
+  var inLineComment = false;
+  var inBlockComment = false;
+  for (var i = 0; i < source.length; i++) {
+    final c = source[i];
+    final next = i + 1 < source.length ? source[i + 1] : '';
+    if (inLineComment) {
+      if (c == '\n') {
+        inLineComment = false;
+        out.write(c);
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (c == '*' && next == '/') {
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+    if (inString || inChar) {
+      if (c == r'\') {
+        i++;  // the escaped character does not close the literal
+        continue;
+      }
+      if (inString && c == '"') {
+        inString = false;
+      } else if (inChar && c == "'") {
+        inChar = false;
+      }
+      continue;
+    }
+    if (c == '/' && next == '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (c == '/' && next == '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (c == '"') {
+      inString = true;
+      continue;
+    }
+    if (c == "'") {
+      inChar = true;
+      continue;
+    }
+    out.write(c);
+  }
+  return out.toString();
+}
+
 /// Structural gate for the Windows plugin.
 ///
 /// Windows is the one platform this repository's CI cannot compile (the runner
@@ -83,7 +144,22 @@ void main() {
         'the plugin answers the methods the Dart layer and the other platforms use',
         () async {
       expect(source, contains('"extractText"'));
+      expect(source, contains('"extractHocr"'));
       expect(source, contains('"isSupported"'));
+      // extractTextFromBytes sends the image on the channel as imageBytes;
+      // the handler must accept it, not answer MISSING_IMAGE_PATH for every
+      // bytes call.
+      expect(source, contains('"imageBytes"'));
+    });
+
+    test('hOCR selects the HOCR reader over the plain-text one', () async {
+      // The one behaviour this plugin adds beyond the Linux one — the is_hocr
+      // branch must keep reading the right C API entry point.
+      expect(
+        source,
+        contains('is_hocr ? TessBaseAPIGetHOCRText(api, 0)'),
+      );
+      expect(source, contains('TessBaseAPIGetUTF8Text(api)'));
     });
 
     test('the plugin rejects the Apple Vision engine instead of running it',
@@ -102,9 +178,18 @@ void main() {
       );
     });
 
-    test('the CMake target links Tesseract and Leptonica', () async {
-      expect(cmake, contains('tesseract'));
-      expect(cmake, contains('lept'));
+    test('the CMake target links the located Tesseract import libraries',
+        () async {
+      // The link line must name the variable the discovery above fills —
+      // hardcoding a library name here would break every layout the probe
+      // supports (pkg-config, TESSERACT_ROOT, the install prefixes).
+      expect(
+        cmake,
+        contains(
+          r'target_link_libraries(${PLUGIN_NAME} PRIVATE '
+          r'${_tesseract_link_libraries})',
+        ),
+      );
     });
 
     test('the CMake finds Tesseract on a Windows host', () async {
@@ -112,6 +197,9 @@ void main() {
       // UB-Mannheim installer, which ships no .pc file.
       expect(cmake, contains('pkg_check_modules'));
       expect(cmake, contains('TESSERACT_ROOT'));
+      // The prefix probe keys on the C API header actually shipping with an
+      // install — a directory that merely exists must not be accepted.
+      expect(cmake, contains('include/tesseract/capi.h'));
       // A missing dependency must stop the build with instructions, never
       // silently produce a plugin that fails to load.
       expect(cmake, contains('FATAL_ERROR'));
@@ -121,11 +209,26 @@ void main() {
         () async {
       expect(cmake, contains('set(tesseract_ocr_bundled_libraries'));
       expect(cmake, contains('PARENT_SCOPE'));
-      expect(cmake, contains('.dll'));
+      // The globs that feed the bundle in both layouts — a comment mentioning
+      // DLLs must not satisfy this.
+      expect(
+        cmake,
+        contains(r'file(GLOB _pkg_config_dlls "${_dll_dir}/*.dll")'),
+      );
+      expect(cmake, contains(r'"${_tesseract_prefix}/*.dll"'));
+      expect(cmake, contains(r'"${_tesseract_prefix}/bin/*.dll"'));
+      // An empty bundle must warn at configure time, not fail at app launch.
+      expect(cmake, contains('no DLLs were found'));
     });
 
-    test('the plugin resolves a UB-Mannheim tessdata directory', () async {
-      expect(source, contains('Tesseract-OCR'));
+    test('the plugin resolves a tessdata directory from the environment',
+        () async {
+      // The runtime candidates must come from the same environment prefixes
+      // the CMake probe reads — a hardcoded C:\ path breaks any other system
+      // drive and the per-user install.
+      expect(source, contains('ProgramFiles(x86)'));
+      expect(source, contains('LOCALAPPDATA'));
+      expect(source, contains('"Programs\\\\Tesseract-OCR"'));
       expect(source, contains('tessdata'));
     });
 
@@ -137,6 +240,16 @@ void main() {
 
     test('the image path is validated before it reaches the engine', () async {
       expect(source, contains('INVALID_PATH'));
+      // The same character set the Linux sibling checks: `%` is a legal
+      // Windows filename character and nothing on this call path expands it.
+      expect(source, contains(r'find_first_of("\"|;&$`\n\r")'));
+    });
+
+    test('the path lookup decodes the UTF-8 bytes that arrived', () async {
+      // Paths arrive as UTF-8; a GetFileAttributesA lookup would read them
+      // through the ANSI code page and reject every non-ASCII directory.
+      expect(source, contains('GetFileAttributesW'));
+      expect(source, contains('CP_UTF8'));
     });
 
     test('the sources are syntactically balanced', () async {
@@ -147,14 +260,17 @@ void main() {
         'windows/include/tesseract_ocr/tesseract_ocr_plugin_c_api.h':
             cApiHeader,
       }.entries) {
+        // Count only code: a brace inside a message string or a comment must
+        // not cancel a missing one in the code around it.
+        final String code = stripNonCode(entry.value);
         for (final List<String> pair in <List<String>>[
           <String>['{', '}'],
           <String>['(', ')'],
           <String>['[', ']'],
         ]) {
           expect(
-            entry.value.split(pair[0]).length - 1,
-            entry.value.split(pair[1]).length - 1,
+            code.split(pair[0]).length - 1,
+            code.split(pair[1]).length - 1,
             reason: 'unbalanced ${pair[0]}${pair[1]} in ${entry.key}',
           );
         }

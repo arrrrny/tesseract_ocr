@@ -23,7 +23,9 @@
 #include <tesseract/capi.h>
 #pragma warning(pop)
 
+#include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <string>
@@ -35,28 +37,36 @@
 namespace tesseract_ocr {
 namespace {
 
-/// Traineddata directories probed when the caller did not supply one.
-///
-/// The Dart layer copies the asset tessdata into the app's documents directory
-/// and passes that in, so these are the fallback for a system install. Both the
-/// 64-bit and the 32-bit install prefixes are checked because the installer
-/// lets the user choose, and the per-user install is the one a non-admin gets.
-const char* kTessdataCandidates[] = {
-    "C:\\Program Files\\Tesseract-OCR\\tessdata",
-    "C:\\Program Files (x86)\\Tesseract-OCR\\tessdata",
-};
-
 /// A path is safe to hand to the engine only if it carries no shell
-/// metacharacters or escape characters. The plugin spawns no shell, but a
-/// hostile path could still confuse a downstream argument parser, and `%` would
-/// be expanded by anything that treats the string as a command line.
+/// metacharacters or escape characters. The plugin spawns no shell and builds
+/// no command line — the path goes straight to `pixRead` — so this is the same
+/// set the Linux sibling checks; `%` is a legal Windows filename character and
+/// nothing on this call path would expand it, so it is not rejected.
 bool path_is_safe(const std::string& path) {
-  return path.find_first_of("\"|;&$`\n\r%") == std::string::npos;
+  return path.find_first_of("\"|;&$`\n\r") == std::string::npos;
 }
 
 /// True when `path` names an existing file (not a directory).
+///
+/// The path arrives as UTF-8 bytes (the standard codec decodes the Dart string
+/// verbatim), so the lookup must decode them as UTF-8: `GetFileAttributesA`
+/// would read them through the process's ANSI code page and report a directory
+/// like `C:\Users\Şafak\…` as missing.
 bool file_exists(const std::string& path) {
-  const DWORD attributes = GetFileAttributesA(path.c_str());
+  const int wide_length = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(),
+      static_cast<int>(path.size()), nullptr, 0);
+  if (wide_length <= 0) {
+    return false;
+  }
+  std::vector<wchar_t> wide(static_cast<size_t>(wide_length));
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(),
+                          static_cast<int>(path.size()), wide.data(),
+                          wide_length) <= 0) {
+    return false;
+  }
+  const std::wstring wide_path(wide.data(), static_cast<size_t>(wide_length));
+  const DWORD attributes = GetFileAttributesW(wide_path.c_str());
   return attributes != INVALID_FILE_ATTRIBUTES &&
          (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
@@ -94,6 +104,32 @@ std::string tessdata_prefix() {
   return value == nullptr ? std::string() : std::string(value);
 }
 
+/// The traineddata directories probed when the caller did not supply one.
+///
+/// The Dart layer copies the asset tessdata into the app's documents directory
+/// and passes that in, so these are the fallback for a system install. The
+/// prefixes are read from the environment at run time so the list matches what
+/// windows/CMakeLists.txt probes for the import libraries: both program-files
+/// installs (64-bit and 32-bit) and the per-user install — the one a non-admin
+/// gets — instead of hardcoded `C:\Program Files` paths that break on any
+/// other system drive.
+std::vector<std::string> tessdata_candidates() {
+  std::vector<std::string> candidates;
+  const auto add = [&candidates](const char* base_env,
+                                 const char* subdirectory) {
+    const char* base = std::getenv(base_env);
+    if (base != nullptr && base[0] != '\0') {
+      candidates.push_back(std::string(base) + "\\" + subdirectory +
+                           "\\tessdata");
+    }
+  };
+  add("ProgramFiles", "Tesseract-OCR");
+  add("ProgramW6432", "Tesseract-OCR");
+  add("LOCALAPPDATA", "Programs\\Tesseract-OCR");
+  add("ProgramFiles(x86)", "Tesseract-OCR");
+  return candidates;
+}
+
 /// Resolves the tessdata directory to hand to TessBaseAPIInit3.
 ///
 /// A caller-supplied path may point either directly at the traineddata files or
@@ -118,7 +154,7 @@ std::string resolve_tessdata(const std::string& tess_data_path,
     return prefix;
   }
 
-  for (const char* candidate : kTessdataCandidates) {
+  for (const std::string& candidate : tessdata_candidates()) {
     if (dir_has_language(candidate, language)) {
       return candidate;
     }
@@ -151,6 +187,26 @@ std::string string_arg(const flutter::EncodableMap& args, const char* key,
                        const std::string& fallback) {
   const std::string* value = string_value(args, key);
   return value == nullptr ? fallback : *value;
+}
+
+/// The bytes stored under `key`, or empty when the key is absent or does not
+/// hold a byte list. A Dart `Uint8List` decodes through the standard codec as
+/// `std::vector<uint8_t>` — exactly one of `imagePath` and `imageBytes` is
+/// set on a call (see `TesseractOcr._recognize`).
+std::vector<uint8_t> bytes_arg(const flutter::EncodableMap& args,
+                               const char* key) {
+  for (const auto& entry : args) {
+    const std::string* name = std::get_if<std::string>(&entry.first);
+    if (name == nullptr || *name != key) {
+      continue;
+    }
+    if (const std::vector<uint8_t>* bytes =
+            std::get_if<std::vector<uint8_t>>(&entry.second)) {
+      return *bytes;
+    }
+    return {};
+  }
+  return {};
 }
 
 /// Flattens the `options` map into Tesseract variable assignments, skipping the
@@ -199,6 +255,51 @@ struct Recognition {
   std::string error_code;
   std::string error_message;
 };
+
+/// Writes the image bytes a call carried to a unique temporary file and
+/// returns its path, or "" when the write failed.
+///
+/// Leptonica's `pixReadMem` is the natural entry point for bytes, but its
+/// signature has changed across the versions a Windows install may ship, and
+/// the plugin is built against the system's leptonica rather than a pinned
+/// one. A file keeps the decode path on the one signature this plugin already
+/// compiles — the same shape the Linux plugin uses (`write_bytes_to_temp_file`).
+std::string write_bytes_to_temp_file(const uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0) {
+    return "";
+  }
+
+  // GetTempPath honours TMP/TEMP and falls back to the Windows directory when
+  // both are unset — the Windows shape of the Linux plugin's $TMPDIR handling.
+  char temp_dir[MAX_PATH];
+  const DWORD dir_length = GetTempPathA(MAX_PATH, temp_dir);
+  if (dir_length == 0 || dir_length >= MAX_PATH) {
+    return "";
+  }
+
+  // GetTempFileName creates the file and fills `path_buffer` with its unique
+  // name; a unique parameter of 0 lets it pick the suffix itself, which is the
+  // mkstemp equivalent. The prefix is truncated to its first three characters.
+  char path_buffer[MAX_PATH];
+  if (GetTempFileNameA(temp_dir, "tesseract_ocr", 0, path_buffer) == 0) {
+    return "";
+  }
+  const std::string path(path_buffer);
+
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    DeleteFileA(path.c_str());
+    return "";
+  }
+  file.write(reinterpret_cast<const char*>(data),
+             static_cast<std::streamsize>(length));
+  file.close();
+  if (file.fail()) {
+    DeleteFileA(path.c_str());
+    return "";
+  }
+  return path;
+}
 
 /// Runs the engine. Blocking and CPU-bound, so it is called from a worker
 /// thread — never from the platform thread.
@@ -320,8 +421,15 @@ void TesseractOcrPlugin::HandleMethodCall(
     return;
   }
 
+  // A call carries either a path or the encoded image (extractTextFromBytes).
+  // Bytes never become a path in the reply: they are written to a temporary
+  // file on the worker thread, so the argument this handler answers for stays
+  // the caller's own.
+  const std::vector<uint8_t> image_bytes = bytes_arg(*args, "imageBytes");
+  const bool has_image_bytes = !image_bytes.empty();
   const std::string image_path = string_arg(*args, "imagePath", "");
-  if (image_path.empty()) {
+
+  if (!has_image_bytes && image_path.empty()) {
     result->Error("MISSING_IMAGE_PATH",
                   "imagePath is required and must not be empty");
     return;
@@ -335,7 +443,7 @@ void TesseractOcrPlugin::HandleMethodCall(
     return;
   }
 
-  if (!path_is_safe(image_path)) {
+  if (!has_image_bytes && !path_is_safe(image_path)) {
     result->Error("INVALID_PATH", "Image path contains invalid characters.");
     return;
   }
@@ -350,9 +458,25 @@ void TesseractOcrPlugin::HandleMethodCall(
   // platform task runner), so no manual hop back to the platform thread is
   // needed here.
   std::thread([result = std::move(result), image_path, language, tess_data,
-               is_hocr, options]() mutable {
-    const Recognition outcome =
-        recognize(image_path, language, tess_data, is_hocr, options);
+               is_hocr, options, image_bytes]() mutable {
+    Recognition outcome;
+    if (image_bytes.empty()) {
+      outcome = recognize(image_path, language, tess_data, is_hocr, options);
+    } else {
+      // The engine reads the image from disk, so the bytes are written to a
+      // unique temporary file for the duration of this recognition and
+      // removed again — the plugin never leaves an image behind.
+      const std::string temporary =
+          write_bytes_to_temp_file(image_bytes.data(), image_bytes.size());
+      if (temporary.empty()) {
+        outcome.error_code = "IMAGE_LOAD_FAILED";
+        outcome.error_message =
+            "Could not write the image bytes to a temporary file.";
+      } else {
+        outcome = recognize(temporary, language, tess_data, is_hocr, options);
+        DeleteFileA(temporary.c_str());
+      }
+    }
 
     // A failure is reported the same way the other platforms report it: a
     // method-channel error, which the Dart side surfaces as a
