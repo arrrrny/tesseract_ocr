@@ -1,5 +1,7 @@
 ## 0.6.1
 
+*   **Windows platform support (issue #57):** a C++ CMake plugin on the `tesseract_ocr` method channel, mirroring the Linux one — it links Tesseract and Leptonica, discovers them through pkg-config (vcpkg, MSYS2) or a `TESSERACT_ROOT` prefix (the UB-Mannheim installer), bundles their DLLs next to the executable, and resolves the UB-Mannheim `tessdata` directory when the caller supplies none
+*   OCR on Windows runs on a worker thread, rejects `OCREngine.vision` (iOS-only) with `UNSUPPORTED_ENGINE`, and validates the image path before it reaches the engine
 *   **`OCRConfig.options` is honoured on Android again (issue #59):** `tessedit_pageseg_mode` now reaches `TessBaseAPI.setPageSegMode` instead of every recognition running with `PSM_AUTO`, and every other option is applied with `setVariable` — previously the Android plugin never read `options` at all
 *   **iOS Vision honours a documented subset of options:** `recognition_level` (`fast`/`accurate`) and `uses_language_correction` are applied to the Vision request; any other key is logged as ignored rather than silently dropped
 *   **macOS and Linux no longer emit the PSM and OEM twice:** both are excluded from the generic `-c key=value` passthrough, and the Linux plugin now applies the PSM and the Tesseract variables at all
