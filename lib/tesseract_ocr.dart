@@ -25,7 +25,10 @@ class TesseractOcr {
       debugIsMacOSOverride ??
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS);
 
-  /// Runs OCR on [imagePath] and returns the recognized plain text.
+  /// Recognizes the text in the image at [imagePath] and returns the plain text.
+  ///
+  /// The tessdata set is copied from the asset bundle into the app's documents
+  /// directory first unless [OCRConfig.tessDataPath] names one.
   ///
   /// See [extractHocr] for the layout-aware (bounding-box) output format.
   static Future<String> extractText(
@@ -61,6 +64,46 @@ class TesseractOcr {
       throw ArgumentError.value(imagePath, 'imagePath', 'Must not be empty');
     }
 
+    return _recognize(method: method, imagePath: imagePath, config: config);
+  }
+
+  /// Recognizes the text in an encoded image held in memory.
+  ///
+  /// A camera-first caller already has the bytes, and making it write a
+  /// temporary file first is work the plugin can do itself: the bytes travel to
+  /// the platform engine as they are, and each engine takes them through its own
+  /// native entry point (a bitmap on Android, a typed array on Web, a data
+  /// buffer on Apple platforms). Only the two engines that are driven by a
+  /// command line — macOS and Linux — materialise the bytes into a temporary
+  /// file, which they delete again.
+  ///
+  /// [bytes] must be a complete encoded image (PNG, JPEG, …), exactly the file
+  /// content an image path would have pointed at.
+  static Future<String> extractTextFromBytes(
+    Uint8List bytes, {
+    OCRConfig? config,
+  }) async {
+    if (bytes.isEmpty) {
+      throw ArgumentError.value(bytes, 'bytes', 'Must not be empty');
+    }
+
+    return _recognize(imageBytes: bytes, config: config);
+  }
+
+  /// The one recognition path every entry point shares.
+  ///
+  /// Exactly one of [imagePath] and [imageBytes] is given: the platform engines
+  /// disagree about whether an image can be handed over in memory, so the
+  /// channel carries whichever form this call has rather than a wrapper the
+  /// natives would each have to unwrap. [method] is the channel method the
+  /// result format selects (`extractText`, or `extractHocr` for the
+  /// layout-aware output).
+  static Future<String> _recognize({
+    String method = 'extractText',
+    String? imagePath,
+    Uint8List? imageBytes,
+    OCRConfig? config,
+  }) async {
     final actualConfig = config ?? const OCRConfig();
 
     if (method == 'extractHocr' && actualConfig.engine == OCREngine.vision) {
@@ -78,12 +121,10 @@ class TesseractOcr {
         );
       }
     } else {
-      if (!await io_helper.fileExists(imagePath)) {
+      final String? path = imagePath;
+      if (path != null && !await io_helper.fileExists(path)) {
         throw ArgumentError.value(
-          imagePath,
-          'imagePath',
-          'Image file does not exist',
-        );
+            path, 'imagePath', 'Image file does not exist');
       }
       if (_isMacOS && actualConfig.engine == OCREngine.vision) {
         throw UnsupportedError(
@@ -106,7 +147,8 @@ class TesseractOcr {
     }
 
     final Map<String, dynamic> args = {
-      'imagePath': imagePath,
+      if (imagePath != null) 'imagePath': imagePath,
+      if (imageBytes != null) 'imageBytes': imageBytes,
       'tessData': tessDataPath,
       'language': actualConfig.language,
       'engine': actualConfig.engine.toString().split('.').last,

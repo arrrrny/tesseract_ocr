@@ -47,7 +47,7 @@ public struct VisionOcrOptions {
         var usesLanguageCorrection = true
         var ignoredKeys: [String] = []
 
-        for (key in rawOptions.keys.sorted()) {
+        for key in rawOptions.keys.sorted() {
             guard let value = rawOptions[key], !(value is NSNull) else {
                 ignoredKeys.append(key)
                 continue
@@ -103,6 +103,41 @@ public struct VisionOcrOptions {
     }
 }
 
+/// Where one recognition call takes its image from.
+///
+/// The Dart layer sends whichever form the caller has: a path for
+/// `extractText`, the encoded bytes for `extractTextFromBytes`. The engines
+/// differ in what they can consume — the Tesseract core reads a memory buffer,
+/// Vision wraps a `UIImage` — so the call resolves the source once and each
+/// engine takes what it needs from it.
+enum OcrImageSource {
+    case path(String)
+    case data(Data)
+
+    /// The image data, read from the path when that is the source.
+    ///
+    /// A path that cannot be read is a load failure, not an empty image: the
+    /// caller pointed at a file that is gone or unreadable.
+    func loadData() -> Data? {
+        switch self {
+        case .path(let path):
+            return try? Data(contentsOf: URL(fileURLWithPath: path))
+        case .data(let data):
+            return data
+        }
+    }
+
+    /// How a log line or an error names this source.
+    var description: String {
+        switch self {
+        case .path(let path):
+            return "path: \(path)"
+        case .data(let data):
+            return "\(data.count) bytes"
+        }
+    }
+}
+
 /// Unified Tesseract OCR plugin for iOS, macOS, and Linux
 public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -149,7 +184,17 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        guard let imagePath = args["imagePath"] as? String, !imagePath.isEmpty else {
+        // The Dart layer sends the image as bytes when the caller has bytes.
+        // A path is still required when it does not: a recognition without any
+        // image is a caller mistake, not an empty result.
+        let imageBytes = (args["imageBytes"] as? FlutterStandardTypedData)?.data
+        let imagePath = args["imagePath"] as? String
+        let imageSource: OcrImageSource
+        if let imageBytes = imageBytes, !imageBytes.isEmpty {
+            imageSource = .data(imageBytes)
+        } else if let imagePath = imagePath, !imagePath.isEmpty {
+            imageSource = .path(imagePath)
+        } else {
             result(FlutterError(
                 code: "MISSING_IMAGE_PATH",
                 message: "imagePath is required and must not be empty",
@@ -185,14 +230,14 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
         if useVision {
             performVisionOCR(
-                imagePath: imagePath,
+                imageSource: imageSource,
                 language: language,
                 config: rawConfig,
                 result: result
             )
         } else {
             performTesseractOCR(
-                imagePath: imagePath,
+                imageSource: imageSource,
                 language: language,
                 tessData: tessData,
                 config: rawConfig,
@@ -210,7 +255,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             return
         }
         performTesseractOCR(
-            imagePath: imagePath,
+            imageSource: imageSource,
             language: language,
             tessData: tessData,
             config: rawConfig,
@@ -228,7 +273,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
 
     #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
     private func performVisionOCR(
-        imagePath: String,
+        imageSource: OcrImageSource,
         language: String,
         config: [String: Any]?,
         result: @escaping FlutterResult
@@ -246,11 +291,20 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             )
         }
         
-        guard let image = UIImage(contentsOfFile: imagePath),
-              let cgImage = image.cgImage else {
+        // Vision reads a UIImage, which it can build from a path or from the
+        // encoded bytes directly — no temporary file either way.
+        let image: UIImage?
+        switch imageSource {
+        case .path(let path):
+            image = UIImage(contentsOfFile: path)
+        case .data(let data):
+            image = UIImage(data: data)
+        }
+
+        guard let image = image, let cgImage = image.cgImage else {
             result(FlutterError(
                 code: "IMAGE_LOAD_FAILED",
-                message: "Could not load image at path: \(imagePath)",
+                message: "Could not load image from \(imageSource.description)",
                 details: nil
             ))
             return
@@ -377,29 +431,33 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     }
 
     private func performTesseractOCR(
-        imagePath: String,
+        imageSource: OcrImageSource,
         language: String,
         tessData: String?,
         config: [String: Any]?,
         isHocr: Bool,
         result: @escaping FlutterResult
     ) {
-        // Validate image path contains no shell metacharacters
-        let invalidChars = CharacterSet(charactersIn: ";|&$`\n\r")
-        if imagePath.unicodeScalars.contains(where: { invalidChars.contains($0) }) {
-            result(FlutterError(
-                code: "INVALID_PATH",
-                message: "Image path contains invalid characters",
-                details: nil
-            ))
-            return
+        // A path reaches Tesseract from the shell-facing entry points, so it is
+        // validated for shell metacharacters; bytes never do.
+        if case .path(let path) = imageSource {
+            let invalidChars = CharacterSet(charactersIn: ";|&$`\n\r")
+            if path.unicodeScalars.contains(where: { invalidChars.contains($0) }) {
+                result(FlutterError(
+                    code: "INVALID_PATH",
+                    message: "Image path contains invalid characters",
+                    details: nil
+                ))
+                return
+            }
         }
 
-        // Load image data
-        guard let imageData = try? Data(contentsOf: URL(fileURLWithPath: imagePath)) else {
+        // The Tesseract core reads a memory buffer, so both sources end up as
+        // bytes: a path is read here, the bytes are already here.
+        guard let imageData = imageSource.loadData() else {
             result(FlutterError(
                 code: "IMAGE_LOAD_FAILED",
-                message: "Could not load image at path: \(imagePath)",
+                message: "Could not load image from \(imageSource.description)",
                 details: nil
             ))
             return

@@ -332,6 +332,28 @@ import 'package:tesseract_ocr/ocr_engine_config.dart';
 
 To perform OCR, use the `TesseractOcr.extractText` method. You can pass an optional `OCRConfig` object to specify the engine and other options.
 
+If the image is already in memory — a camera frame, a picked file's bytes — use
+`TesseractOcr.extractTextFromBytes` instead of writing a temporary file first.
+It takes the same `OCRConfig`:
+
+```dart
+import 'dart:typed_data';
+
+// `bytes` is a complete encoded image: exactly the file content an image path
+// would have pointed at.
+final Uint8List bytes = await pickImageBytes();
+final String text = await TesseractOcr.extractTextFromBytes(
+  bytes,
+  config: const OCRConfig(language: 'eng', engine: OCREngine.tesseract),
+);
+```
+
+Each platform takes the bytes through its own engine entry point — a bitmap on
+Android, a typed array on Web, a data buffer on Apple platforms — so no file is
+written. The two engines driven by the `tesseract` command line (macOS and
+Linux) do write the bytes to a temporary file for the duration of the
+recognition, and delete it again.
+
 ```dart
 Future<void> _performOcr(String imagePath) async {
   try {
