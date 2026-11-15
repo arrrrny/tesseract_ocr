@@ -332,6 +332,28 @@ import 'package:tesseract_ocr/ocr_engine_config.dart';
 
 To perform OCR, use the `TesseractOcr.extractText` method. You can pass an optional `OCRConfig` object to specify the engine and other options.
 
+If the image is already in memory — a camera frame, a picked file's bytes — use
+`TesseractOcr.extractTextFromBytes` instead of writing a temporary file first.
+It takes the same `OCRConfig`:
+
+```dart
+import 'dart:typed_data';
+
+// `bytes` is a complete encoded image: exactly the file content an image path
+// would have pointed at.
+final Uint8List bytes = await pickImageBytes();
+final String text = await TesseractOcr.extractTextFromBytes(
+  bytes,
+  config: const OCRConfig(language: 'eng', engine: OCREngine.tesseract),
+);
+```
+
+Each platform takes the bytes through its own engine entry point — a bitmap on
+Android, a typed array on Web, a data buffer on Apple platforms — so no file is
+written. The two engines driven by the `tesseract` command line (macOS and
+Linux) do write the bytes to a temporary file for the duration of the
+recognition, and delete it again.
+
 ```dart
 Future<void> _performOcr(String imagePath) async {
   try {
@@ -389,6 +411,41 @@ print('Rotate by ${osd.orientationDegrees}°, script: ${osd.scriptName}');
 ```
 
 OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`). Android answers `UNSUPPORTED_OSD`: the bundled tesseract4android 4.8.0 binding exposes no OSD result API.
+
+### Extracting hOCR (layout-aware output)
+
+Alongside plain text, the plugin can return **hOCR** — an HTML-like, layout-aware
+representation of the recognized text where every line, word and symbol carries
+its bounding box. Use it when you need the *structure* of the page (positions,
+word/line grouping) rather than just the characters:
+
+```dart
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+
+Future<void> _performHocr(String imagePath) async {
+  try {
+    final hocr = await TesseractOcr.extractHocr(
+      imagePath,
+      config: const OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+      ),
+    );
+    print('hOCR:\n$hocr');
+  } catch (e) {
+    print('Error performing hOCR: $e');
+  }
+}
+```
+
+- `extractHocr` has the same signature and options as `extractText`; only the
+  returned format differs.
+- It is produced by the **Tesseract** engine, which backs Android, Web, macOS,
+  iOS and Linux.
+- Apple's **Vision** engine (`OCREngine.vision`) has no hOCR output: requesting
+  hOCR with it throws an `UnsupportedError`. Use `OCREngine.tesseract` or
+  `OCREngine.defaultEngine` for hOCR.
 
 ### `OCRConfig`
 
