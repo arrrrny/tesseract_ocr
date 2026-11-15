@@ -8,6 +8,74 @@ import 'package:tesseract_ocr/src/tessdata_assets.dart';
 
 Future<bool> fileExists(String path) => File(path).exists();
 
+/// Resolves a caller-supplied tessdata directory to the directory that holds the
+/// requested languages' `.traineddata` (issue #56).
+///
+/// A download-on-demand flow points recognition at a directory already on the
+/// device, and that directory comes in either layout: the `.traineddata` files
+/// sit in it directly, or it is a parent carrying the `tessdata/`
+/// subdirectory the bundled asset copy produces. Both resolve to the directory
+/// the engine reads, so a downloaded set and a bundled set behave identically.
+///
+/// Anything else throws [PlatformException] naming [path]: the native engine's
+/// own `TESSDATA_NOT_FOUND` sends the caller back to declaring Flutter assets,
+/// which is exactly the step this flow exists to skip.
+Future<String> resolveTessDataDirectory(
+  String path, {
+  required String language,
+}) async {
+  final String trimmed = path.trim();
+  final List<String> parts = TessDataAssets.languageParts(language);
+  final List<String> wanted = (parts.isEmpty ? <String>['eng'] : parts)
+      .map(TessDataAssets.trainedDataFile)
+      .toList(growable: false);
+
+  if (trimmed.isNotEmpty) {
+    for (final String candidate in <String>[
+      trimmed,
+      join(trimmed, TessDataAssets.tessdataDirectoryName),
+    ]) {
+      final List<String>? present = await _trainedDataFiles(candidate);
+      if (present == null) continue;
+      final bool complete = wanted.every(present.contains);
+      if (complete) return candidate;
+    }
+  }
+
+  throw TessDataAssets.pathException(
+    path: trimmed,
+    language: language,
+    missingFiles: wanted,
+  );
+}
+
+/// The `.traineddata` names in directory [path], or null when [path] is not a
+/// directory this isolate can list.
+///
+/// A null return is "no such directory", never an error to raise: a missing
+/// directory and a directory without the file are the same actionable outcome,
+/// and only one of them is worth a stack trace.
+Future<List<String>?> _trainedDataFiles(String path) async {
+  final Directory directory = Directory(path);
+  try {
+    final FileStat stats = await directory.stat();
+    if (stats.type != FileSystemEntityType.directory) return null;
+    final List<String> names = <String>[];
+    await for (final FileSystemEntity entity in directory.list(
+      followLinks: false,
+    )) {
+      if (entity is! File) continue;
+      final String name = basename(entity.path);
+      if (name.endsWith(TessDataAssets.trainedDataExtension)) {
+        names.add(name);
+      }
+    }
+    return names;
+  } on Object {
+    return null;
+  }
+}
+
 /// The tessdata set this isolate already resolved from the asset bundle.
 ///
 /// Asset bytes are immutable for the life of a process and
@@ -59,9 +127,8 @@ Future<String?> loadTessDataToAppDocuments(
     for (int i = 0; i < resolved.fileNames.length; i++) {
       final String fileName = resolved.fileNames[i];
       final File destFile = File(join(tessdataDirectory.path, fileName));
-      final Uint8List? destinationBytes = await destFile.exists()
-          ? await destFile.readAsBytes()
-          : null;
+      final Uint8List? destinationBytes =
+          await destFile.exists() ? await destFile.readAsBytes() : null;
       if (!TessDataAssets.needsCopy(
         assetBytes: resolved.assets[i],
         knownLength: null,

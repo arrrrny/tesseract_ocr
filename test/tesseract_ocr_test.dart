@@ -101,13 +101,20 @@ void main() {
   test('Package.swift declares SwiftyTesseract dependency for Apple platforms',
       () async {
     final packageSwift = await File('Package.swift').readAsString();
-    expect(packageSwift, contains('https://github.com/SwiftyTesseract/SwiftyTesseract.git'));
-    expect(packageSwift, contains('.product(name: "SwiftyTesseract", package: "SwiftyTesseract")'));
+    expect(packageSwift,
+        contains('https://github.com/SwiftyTesseract/SwiftyTesseract.git'));
+    expect(
+        packageSwift,
+        contains(
+            '.product(name: "SwiftyTesseract", package: "SwiftyTesseract")'));
   });
 
-  test('iOS Swift plugin validates tessData directory and traineddata files before initializing Tesseract',
+  test(
+      'iOS Swift plugin validates tessData directory and traineddata files before initializing Tesseract',
       () async {
-    final swiftSource = await File('Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift').readAsString();
+    final swiftSource =
+        await File('Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift')
+            .readAsString();
     expect(
       swiftSource,
       contains('func validateTessData'),
@@ -132,12 +139,16 @@ void main() {
       ).readAsString();
     });
 
-    test('uses the real EngineMode case (.default), not a non-existent .defaultEngine', () {
+    test(
+        'uses the real EngineMode case (.default), not a non-existent .defaultEngine',
+        () {
       expect(swiftSource, isNot(contains('engineMode = .defaultEngine')));
       expect(swiftSource, contains('engineMode = .default'));
     });
 
-    test('creates and releases the TessBaseAPI handle inside the dispatched OCR closure', () {
+    test(
+        'creates and releases the TessBaseAPI handle inside the dispatched OCR closure',
+        () {
       // The create/defer must live inside the DispatchQueue.async block, not at
       // function scope (which would end the handle before the async OCR runs).
       final asyncBlock = swiftSource.substring(
@@ -339,6 +350,11 @@ void main() {
 
     final customTessData = '${tempDir.path}/custom_tessdata';
     await Directory(customTessData).create(recursive: true);
+    // A device tessdata directory is the download-on-demand layout of #56: the
+    // files are already there, so no asset copy runs and the directory the
+    // engine is pointed at is the one that holds them.
+    await File('$customTessData/eng.traineddata')
+        .writeAsBytes(<int>[1, 2, 3, 4]);
 
     final result = await TesseractOcr.extractText(
       imageFile.path,
@@ -366,6 +382,82 @@ void main() {
       'preserve_interword_spaces': '1',
       'tessedit_pageseg_mode': '6',
     });
+  });
+
+  test('extractText points the engine at the tessdata subdirectory', () async {
+    final imageFile = File('${tempDir.path}/sample.png');
+    await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+    final deviceTessData = '${tempDir.path}/downloaded';
+    await Directory('$deviceTessData/tessdata').create(recursive: true);
+    await File('$deviceTessData/tessdata/eng.traineddata')
+        .writeAsBytes(<int>[1, 2, 3, 4]);
+
+    await TesseractOcr.extractText(
+      imageFile.path,
+      config: OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+        tessDataPath: deviceTessData,
+      ),
+    );
+
+    final args = Map<String, dynamic>.from(
+      recordedCalls.single.arguments as Map,
+    );
+    expect(args['tessData'], '$deviceTessData/tessdata');
+  });
+
+  test('extractText rejects a tessDataPath with no traineddata before any call',
+      () async {
+    final imageFile = File('${tempDir.path}/sample.png');
+    await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+    final emptyTessData = '${tempDir.path}/empty_tessdata';
+    await Directory(emptyTessData).create(recursive: true);
+
+    await expectLater(
+      () => TesseractOcr.extractText(
+        imageFile.path,
+        config: OCRConfig(
+          language: 'eng',
+          engine: OCREngine.tesseract,
+          tessDataPath: emptyTessData,
+        ),
+      ),
+      throwsA(
+        isA<PlatformException>()
+            .having(
+              (PlatformException error) => error.code,
+              'code',
+              'tessdata-path-invalid',
+            )
+            .having(
+              (PlatformException error) => error.message,
+              'message',
+              contains('eng.traineddata'),
+            ),
+      ),
+    );
+    expect(recordedCalls, isEmpty);
+  });
+
+  test('extractText leaves a Web tessDataPath URL untouched', () async {
+    TesseractOcr.debugIsWebOverride = true;
+
+    await TesseractOcr.extractText(
+      'blob:https://example.com/1234',
+      config: const OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+        tessDataPath: 'https://cdn.example.com/tessdata',
+      ),
+    );
+
+    final args = Map<String, dynamic>.from(
+      recordedCalls.single.arguments as Map,
+    );
+    expect(args['tessData'], 'https://cdn.example.com/tessdata');
   });
 
   test('extractText rejects Apple Vision engine on macOS', () async {

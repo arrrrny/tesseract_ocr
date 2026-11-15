@@ -94,6 +94,47 @@ public class RecognitionRunnerTest {
         assertEquals(0, api.imageCount());
     }
 
+    /**
+     * A tessdata directory on the device (issue #56) is resolved to the datapath
+     * {@code TessBaseAPI.init} reads, while a datapath is passed through: the two
+     * layouts differ by one path segment, and the engine only accepts one.
+     */
+    @Test
+    public void aTessdataDirectoryIsResolvedToItsParentForInit() throws Exception {
+        final File root = temporaryDirectory();
+        final File tessdata = new File(root, "tessdata");
+        assertTrue(tessdata.mkdirs());
+        assertTrue(new File(tessdata, "eng.traineddata").createNewFile());
+
+        assertEquals(root.getPath(), RecognitionRunner.dataPathFor(tessdata.getPath()));
+    }
+
+    @Test
+    public void aDataPathIsPassedThroughUnchanged() throws Exception {
+        final File root = temporaryDirectory();
+        final File tessdata = new File(root, "tessdata");
+        assertTrue(tessdata.mkdirs());
+        assertTrue(new File(tessdata, "eng.traineddata").createNewFile());
+
+        assertEquals(root.getPath(), RecognitionRunner.dataPathFor(root.getPath()));
+    }
+
+    @Test
+    public void aPathWithNoTrainedDataIsPassedThroughForTheEngineToJudge() {
+        assertEquals(
+            TESS_DATA,
+            RecognitionRunner.dataPathFor(TESS_DATA)
+        );
+    }
+
+    private static File temporaryDirectory() throws Exception {
+        final File root = File.createTempFile("tessdata_runner_", "");
+        assertTrue(root.delete());
+        assertTrue(root.mkdirs());
+        root.deleteOnExit();
+        return root;
+    }
+
     @Test
     public void failedRecognitionIsReportedInsteadOfCrashing() {
         api.readFailure = new IllegalStateException("native read failed");

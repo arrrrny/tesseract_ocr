@@ -175,7 +175,7 @@ class RecognitionRunner {
             }
 
             try {
-                if (!baseApi.init(tessDataPath, language)) {
+                if (!baseApi.init(dataPathFor(tessDataPath), language)) {
                     reply.error(
                         INIT_ERROR,
                         "Failed to initialize Tesseract for language '"
@@ -247,5 +247,34 @@ class RecognitionRunner {
         } catch (Throwable ignored) {
             // Releasing a broken handle must not mask the recognition result.
         }
+    }
+
+    /**
+     * The datapath {@link NativeOcrApi#init} expects for {@code tessDataPath}.
+     *
+     * <p>{@code TessBaseAPI.init} reads {@code <datapath>/tessdata/<lang>.traineddata},
+     * while every other platform of this plugin reads the directory that holds
+     * the {@code .traineddata} files itself — and that is the shape a caller
+     * pointing recognition at a directory on the device hands us (issue #56: a
+     * downloaded or shared tessdata directory, with no asset copy step). Such a
+     * directory is resolved to its parent here; a path that is already a datapath
+     * (the bundled asset copy's layout) is passed through untouched.
+     */
+    static String dataPathFor(String tessDataPath) {
+        final File directory = new File(tessDataPath);
+        if (!holdsTrainedData(directory)) {
+            return tessDataPath;
+        }
+        final String parent = directory.getParent();
+        // A tessdata directory at the filesystem root has no parent to report.
+        return parent == null ? tessDataPath : parent;
+    }
+
+    /** Whether {@code directory} holds at least one {@code .traineddata} file. */
+    private static boolean holdsTrainedData(File directory) {
+        final File[] trainedData = directory.listFiles(
+            (File file) -> file.isFile()
+                && file.getName().endsWith(".traineddata"));
+        return trainedData != null && trainedData.length > 0;
     }
 }
