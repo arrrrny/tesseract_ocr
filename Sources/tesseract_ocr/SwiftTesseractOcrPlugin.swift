@@ -19,6 +19,13 @@ import SwiftyTesseract
 import libtesseract
 #endif
 
+// Vision is an iOS-only engine: `import Vision` sits behind `canImport(UIKit)`,
+// which is false in a macOS pod build, and the macOS podspec links no Vision
+// (macos/tesseract_ocr.podspec: `s.frameworks = 'Foundation', 'AppKit'`). Since
+// this PR macOS compiles this same file, the type that names Vision-only symbols
+// must sit inside the same guard its only consumer (`performVisionOCR`) already
+// uses — otherwise the shared source cannot compile for macOS at all.
+#if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
 /// The options one recognition call carried, as the Vision engine reads them.
 ///
 /// Vision has no Tesseract variable set, so only the options with a Vision
@@ -109,6 +116,7 @@ public struct VisionOcrOptions {
         }
     }
 }
+#endif
 
 /// Where one recognition call takes its image from.
 ///

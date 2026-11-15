@@ -3,7 +3,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'tesseract_ocr'
-  s.version          = '0.5.0'
+  s.version          = '0.6.0'
   s.summary          = 'Tesseract OCR 4 Flutter'
   s.description      = <<-DESC
 Tesseract 4 adds a new neural net (LSTM) based OCR engine which is focused on line recognition. It has unicode (UTF-8) support, and can recognize more than 100 languages.
@@ -24,8 +24,7 @@ Tesseract 4 adds a new neural net (LSTM) based OCR engine which is focused on li
   s.ios.deployment_target = '14.0'
   s.swift_version = '5.3'
   s.pod_target_xcconfig = {
-    'SWIFT_VERSION' => '5.3',
-    'OTHER_SWIFT_FLAGS' => '-DUSE_SWIFTY_TESSERACT'
+    'SWIFT_VERSION' => '5.3'
   }
   s.frameworks = 'Foundation', 'UIKit', 'Vision'
 end

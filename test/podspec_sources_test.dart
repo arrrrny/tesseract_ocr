@@ -90,15 +90,28 @@ void main() {
     File('$root/macos/tesseract_ocr.podspec'),
   ];
 
+  /// The checkout files a podspec pattern can resolve against: the shared
+  /// `Sources/` tree both Apple pods reach through `../`, plus each podspec's
+  /// own directory. Walking the repo root instead walks `.git` and any `build/`
+  /// tree to answer a glob question about two directories.
+  final List<String> files = <String>[];
+  for (final Directory directory in <Directory>[
+    Directory('$root/Sources'),
+    ...podspecs.map((File podspec) => podspec.parent),
+  ]) {
+    if (!directory.existsSync()) continue;
+    files.addAll(
+      directory
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map((File file) => file.path),
+    );
+  }
+
   for (final File podspec in podspecs) {
     test('${podspec.uri.pathSegments.last} patterns resolve to real files', () {
       final String contents = podspec.readAsStringSync();
       final Directory podRoot = podspec.parent;
-      final List<String> files = Directory('$root')
-          .listSync(recursive: true)
-          .whereType<File>()
-          .map((File file) => file.path)
-          .toList();
 
       for (final String attribute in <String>[
         's.source_files',
