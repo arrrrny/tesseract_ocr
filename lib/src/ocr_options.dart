@@ -36,7 +36,7 @@ class OcrOptionSpec {
   /// These are consumed by the Dart layer itself (`language`, `engine`,
   /// `tessDataPath`) or configure the recognition engine rather than a
   /// Tesseract variable (`tessedit_ocr_engine_mode` is applied through
-  /// `setOem` on Android and `--oem` on the command-line platforms).
+  /// `setOem` on Android and `--oem` on the command-line Linux plugin).
   static const Set<String> androidReservedKeys = <String>{
     'language',
     'engine',

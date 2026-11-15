@@ -202,13 +202,22 @@ void main() {
         reason: 'Android OcrOptions must switch on $pageSegModeKey',
       );
 
-      final macos = await File(
-        'macos/tesseract_ocr/Sources/tesseract_ocr/TesseractOcrPlugin.swift',
+      // Both Apple platforms now run the shared Swift plugin, which forwards
+      // every caller option (the page segmentation mode included) to the engine
+      // with TessBaseAPISetVariable instead of building a command line.
+      final apple = await File(
+        'Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift',
       ).readAsString();
       expect(
-        macos,
-        contains('static let pageSegModeKey = "$pageSegModeKey"'),
-        reason: 'the macOS plugin must resolve $pageSegModeKey to --psm',
+        apple,
+        contains('TessBaseAPISetVariable(tessBaseAPI, key, strValue)'),
+        reason: 'the shared Apple plugin must set $pageSegModeKey as a Tesseract '
+            'variable, which is how the PSM reaches the engine on iOS and macOS',
+      );
+      expect(
+        apple,
+        contains('applyTesseractVariables(options, to: tessBaseAPI)'),
+        reason: 'the OCR and OSD paths must both apply the caller options',
       );
     });
 

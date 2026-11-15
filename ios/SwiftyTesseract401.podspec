@@ -13,10 +13,15 @@ This podspec allows using SwiftyTesseract 4.0.1 from GitHub with CocoaPods.
   s.source           = { :git => 'https://github.com/SwiftyTesseract/SwiftyTesseract.git', :tag => '4.0.1' }
   
   s.ios.deployment_target = '11.0'
+  s.osx.deployment_target = '10.13'
   s.swift_version = '5.3'
   
   s.source_files = 'Sources/SwiftyTesseract/**/*.swift'
-  s.frameworks = 'Foundation', 'UIKit'
+  # The sources split their UIKit/AppKit extras behind canImport, and the upstream
+  # package manifest declares both Apple platforms, so the macOS build links
+  # AppKit instead of UIKit.
+  s.ios.frameworks = 'Foundation', 'UIKit'
+  s.osx.frameworks = 'Foundation', 'AppKit'
   
   # libtesseract 0.0.x is an unrelated pod on trunk whose podspec excludes the
   # arm64 simulator slice, which would force EXCLUDED_ARCHS into every app that
