@@ -37,6 +37,8 @@ class TesseractOcrWeb {
           call.arguments,
           isHocr: call.method == 'extractHocr',
         );
+      case 'detectOrientationScript':
+        return _detectOrientationScript(call.arguments);
       default:
         throw PlatformException(
           code: 'Unimplemented',
@@ -157,6 +159,121 @@ class TesseractOcrWeb {
       throw PlatformException(
         code: 'OCR_PROCESS_ERROR',
         message: 'Tesseract.js OCR failed: $error',
+      );
+    } finally {
+      if (worker != null) {
+        try {
+          await worker.callMethod<JSPromise<JSAny?>>('terminate'.toJS).toDart;
+        } catch (_) {
+          // Ignore worker cleanup errors.
+        }
+      }
+    }
+  }
+
+  /// Detects orientation & script through tesseract.js's `worker.detect()`.
+  ///
+  /// `detect()` returns `{ data: { script, script_confidence,
+  /// orientation_degrees, orientation_confidence, ... } }`; this maps that onto
+  /// the same four keys the native engines answer with.
+  Future<Map<String, dynamic>> _detectOrientationScript(
+    dynamic arguments,
+  ) async {
+    if (arguments is! Map) {
+      throw PlatformException(
+        code: 'INVALID_ARGUMENTS',
+        message: 'Arguments were invalid or could not be parsed.',
+      );
+    }
+
+    final params = Map<String, dynamic>.from(arguments);
+    final engine = params['engine']?.toString().toLowerCase();
+    if (engine == 'vision') {
+      throw PlatformException(
+        code: 'UNSUPPORTED_ENGINE',
+        message:
+            'Apple Vision engine does not support OSD. Use OCREngine.tesseract or OCREngine.defaultEngine on Web.',
+      );
+    }
+
+    final rawImagePath = params['imagePath']?.toString().trim() ?? '';
+    if (rawImagePath.isEmpty) {
+      throw PlatformException(
+        code: 'MISSING_PARAMS',
+        message: "Required parameter 'imagePath' is missing.",
+      );
+    }
+
+    // Orientation & script detection runs on the OSD model; fall back to it
+    // when the caller did not name a language, mirroring the native engines.
+    final rawLanguage = params['language']?.toString().trim() ?? '';
+    final language = rawLanguage.isEmpty ? 'osd' : rawLanguage;
+
+    final rawTessData = params['tessData']?.toString().trim();
+    if (rawTessData == null || rawTessData.isEmpty) {
+      await _verifyBundledTrainedData(language);
+    }
+
+    final langPath = TesseractWebHelper.resolveLangPath(
+      baseUri: Uri.base,
+      overridePath: rawTessData,
+    );
+
+    final JSAny imageInput = await _resolveImageInput(rawImagePath);
+
+    await _ensureTesseractLoaded();
+
+    final tesseractObj = globalContext['Tesseract'] as JSObject?;
+    if (tesseractObj == null) {
+      throw PlatformException(
+        code: 'TESSERACT_JS_NOT_AVAILABLE',
+        message: 'window.Tesseract is not available after script load.',
+      );
+    }
+
+    // OSD classifies with the legacy engine's templates, so the worker is
+    // created with the legacy core/lang enabled regardless of the OCR OEM.
+    final workerOptions = <String, Object?>{
+      'langPath': langPath,
+      'gzip': false,
+      'legacyCore': true,
+      'legacyLang': true,
+    }.jsify()!;
+
+    JSObject? worker;
+    try {
+      final workerPromise = tesseractObj.callMethodVarArgs<JSPromise<JSObject>>(
+        'createWorker'.toJS,
+        <JSAny?>[
+          language.toJS,
+          1.toJS,
+          workerOptions,
+        ],
+      );
+      worker = await workerPromise.toDart;
+
+      final detectPromise = worker.callMethodVarArgs<JSPromise<JSObject>>(
+        'detect'.toJS,
+        <JSAny?>[imageInput],
+      );
+      final resultObj = await detectPromise.toDart;
+      final dataObj = resultObj['data'] as JSObject?;
+
+      return <String, dynamic>{
+        'orientation':
+            (dataObj?['orientation_degrees'] as JSNumber?)?.toDartInt ?? 0,
+        'orientation_conf':
+            (dataObj?['orientation_confidence'] as JSNumber?)?.toDartDouble ??
+                0.0,
+        'script': (dataObj?['script'] as JSString?)?.toDart ?? '',
+        'script_conf':
+            (dataObj?['script_confidence'] as JSNumber?)?.toDartDouble ?? 0.0,
+      };
+    } catch (error) {
+      if (error is PlatformException) rethrow;
+      throw PlatformException(
+        code: 'OCR_PROCESS_ERROR',
+        message: 'tesseract.js OSD detection failed: $error',
       );
     } finally {
       if (worker != null) {

@@ -87,6 +87,20 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
                     new MethodChannelReply(result)
                 );
                 break;
+            case "detectOrientationScript":
+                // tesseract4android 4.8.0 exposes no OSD result API on
+                // TessBaseAPI (only PageSegMode constants) and its JNI binds no
+                // DetectOS, so orientation & script detection cannot be surfaced
+                // through the bundled binding. Answer a clear unsupported error
+                // rather than silently returning nothing.
+                result.error(
+                    "UNSUPPORTED_OSD",
+                    "Orientation & script detection is not exposed by the "
+                        + "bundled tesseract4android binding (TessBaseAPI has "
+                        + "no OSD result API).",
+                    null
+                );
+                break;
             default:
                 result.notImplemented();
         }

@@ -192,6 +192,124 @@ Recognition recognize(const std::string& image_path,
   return out;
 }
 
+struct OsdResult {
+  bool ok = false;
+  int orientation = 0;
+  double orientation_conf = 0.0;
+  std::string script;
+  double script_conf = 0.0;
+  std::string error_code;
+  std::string error_message;
+};
+
+// Runs orientation & script detection. Blocking and CPU-bound, so it is called
+// from a worker thread — never from the main loop.
+OsdResult detect_osd(const std::string& image_path,
+                     const std::string& language,
+                     const std::string& tess_data_path,
+                     const std::vector<std::pair<std::string, std::string>>&
+                         options) {
+  OsdResult out;
+
+#if defined(DISABLED_LEGACY_ENGINE)
+  out.error_code = "OSD_UNAVAILABLE";
+  out.error_message =
+      "Orientation & script detection is not available in this Tesseract "
+      "build (legacy engine disabled).";
+  return out;
+#else
+  TessBaseAPI* api = TessBaseAPICreate();
+  if (api == nullptr) {
+    out.error_code = "OCR_INIT_FAILED";
+    out.error_message = "Failed to create the Tesseract API instance.";
+    return out;
+  }
+
+  std::string tessdata = resolve_tessdata(tess_data_path, language);
+  if (TessBaseAPIInit3(api, tessdata.empty() ? nullptr : tessdata.c_str(),
+                       language.c_str()) != 0) {
+    TessBaseAPIDelete(api);
+    out.error_code = "TESSDATA_NOT_FOUND";
+    out.error_message =
+        "Could not initialize Tesseract for language '" + language +
+        "'. Install a legacy-capable traineddata (e.g. osd.traineddata) or "
+        "pass OCRConfig(tessDataPath: ...).";
+    return out;
+  }
+
+  PIX* pix = pixRead(image_path.c_str());
+  if (pix == nullptr) {
+    TessBaseAPIDelete(api);
+    out.error_code = "IMAGE_LOAD_FAILED";
+    out.error_message = "Could not read an image at '" + image_path + "'.";
+    return out;
+  }
+
+  TessBaseAPISetImage2(api, pix);
+  for (const auto& option : options) {
+    TessBaseAPISetVariable(api, option.first.c_str(), option.second.c_str());
+  }
+
+  int orient_deg = 0;
+  float orient_conf = 0.0f;
+  float script_conf = 0.0f;
+  const char* script_name = nullptr;
+  BOOL detected = TessBaseAPIDetectOrientationScript(
+      api, &orient_deg, &orient_conf, &script_name, &script_conf);
+
+  if (detected) {
+    out.ok = true;
+    out.orientation = orient_deg;
+    out.orientation_conf = orient_conf;
+    out.script = script_name == nullptr ? "" : script_name;
+    out.script_conf = script_conf;
+  } else {
+    out.error_code = "OSD_FAILED";
+    out.error_message =
+        "Tesseract could not detect orientation & script. Ensure a "
+        "legacy-capable traineddata (e.g. osd.traineddata) is bundled.";
+  }
+
+  if (script_name != nullptr) {
+    TessDeleteText(script_name);
+  }
+  pixDestroy(&pix);
+  TessBaseAPIDelete(api);
+  return out;
+#endif
+}
+
+// Schedules an OSD reply for `call` on the main loop and releases it after.
+// `value` is a floating FlValue reference (or null for an error); ownership is
+// taken. `call` is a reference the caller already took.
+void respond_osd_on_main(FlMethodCall* call, FlValue* value,
+                         const std::string& code, const std::string& message) {
+  struct Reply {
+    FlMethodCall* call;
+    FlValue* value;
+    std::string code;
+    std::string message;
+  };
+  auto* payload = new Reply{call, value, code, message};
+
+  auto respond = +[](gpointer data) -> gboolean {
+    auto* r = static_cast<Reply*>(data);
+    if (r->value != nullptr) {
+      fl_method_call_respond_success(r->call, r->value, nullptr);
+      fl_value_unref(r->value);
+    } else {
+      fl_method_call_respond_error(r->call, r->code.c_str(), r->message.c_str(),
+                                   nullptr, nullptr);
+    }
+    g_object_unref(r->call);
+    delete r;
+    return G_SOURCE_REMOVE;
+  };
+
+  g_main_context_invoke_full(g_main_context_default(), G_PRIORITY_DEFAULT,
+                             respond, payload, nullptr);
+}
+
 void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
                     gpointer /*user_data*/) {
   const gchar* method = fl_method_call_get_name(method_call);
@@ -206,6 +324,61 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     // A bare bool, matching the other platforms; the Dart layer never wraps it.
     fl_method_call_respond_success(method_call, fl_value_new_bool(true),
                                    nullptr);
+    return;
+  }
+
+  if (g_strcmp0(method, "detectOrientationScript") == 0) {
+    const std::string image_path = string_arg(args, "imagePath", "");
+    if (image_path.empty()) {
+      fl_method_call_respond_error(method_call, "MISSING_PARAMS",
+                                   "Required parameter 'imagePath' is missing.",
+                                   nullptr, nullptr);
+      return;
+    }
+
+    if (string_arg(args, "engine", "defaultEngine") == "vision") {
+      fl_method_call_respond_error(
+          method_call, "UNSUPPORTED_ENGINE",
+          "Apple Vision is iOS-only and has no OSD; use OCREngine.tesseract.",
+          nullptr, nullptr);
+      return;
+    }
+
+    if (!path_is_safe(image_path)) {
+      fl_method_call_respond_error(method_call, "INVALID_PATH",
+                                   "Image path contains invalid characters.",
+                                   nullptr, nullptr);
+      return;
+    }
+
+    FlMethodCall* retained_call = FL_METHOD_CALL(g_object_ref(method_call));
+    const std::string language = string_arg(args, "language", "eng");
+    const std::string tess_data = string_arg(args, "tessData", "");
+    const auto options = collect_options(args);
+
+    std::thread([retained_call, image_path, language, tess_data, options]() {
+      OsdResult osd = detect_osd(image_path, language, tess_data, options);
+
+      FlValue* reply = nullptr;
+      std::string code;
+      std::string message;
+      if (osd.ok) {
+        reply = fl_value_new_map();
+        fl_value_set_string_take(
+            reply, "orientation", fl_value_new_int(osd.orientation));
+        fl_value_set_string_take(
+            reply, "orientation_conf", fl_value_new_float(osd.orientation_conf));
+        fl_value_set_string_take(reply, "script",
+                                 fl_value_new_string(osd.script.c_str()));
+        fl_value_set_string_take(reply, "script_conf",
+                                 fl_value_new_float(osd.script_conf));
+      } else {
+        code = osd.error_code;
+        message = osd.error_message;
+      }
+
+      respond_osd_on_main(retained_call, reply, code, message);
+    }).detach();
     return;
   }
 

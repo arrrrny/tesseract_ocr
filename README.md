@@ -376,6 +376,20 @@ Future<void> _performOcr(String imagePath) async {
 }
 ```
 
+### Orientation & script detection (OSD)
+
+`TesseractOcr.detectOrientationAndScript` mirrors `pytesseract.image_to_osd`: it returns an `OsdResult` carrying the page rotation (`orientationDegrees`, rotate the image by it to make it upright), the detected writing script (`scriptName`), and a confidence for each. Use it to auto-rotate or decline an image before running `extractText`.
+
+```dart
+final osd = await TesseractOcr.detectOrientationAndScript(
+  imagePath,
+  config: const OCRConfig(language: 'osd'), // needs osd.traineddata
+);
+print('Rotate by ${osd.orientationDegrees}°, script: ${osd.scriptName}');
+```
+
+OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`). Android answers `UNSUPPORTED_OSD`: the bundled tesseract4android 4.8.0 binding exposes no OSD result API.
+
 ### `OCRConfig`
 
 The `OCRConfig` class allows detailed configuration of the OCR process:

@@ -120,9 +120,60 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             handleExtractText(call: call, result: result)
         case "isSupported":
             handleIsSupported(result: result)
+        case "detectOrientationScript":
+            handleDetectOrientationScript(call: call, result: result)
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    private func handleDetectOrientationScript(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any] else {
+            result(FlutterError(
+                code: "INVALID_ARGUMENTS",
+                message: "Arguments were invalid or missing",
+                details: nil
+            ))
+            return
+        }
+
+        guard let imagePath = args["imagePath"] as? String, !imagePath.isEmpty else {
+            result(FlutterError(
+                code: "MISSING_IMAGE_PATH",
+                message: "imagePath is required and must not be empty",
+                details: nil
+            ))
+            return
+        }
+
+        let rawConfig = (args["config"] as? [String: Any]) ?? args
+        // OSD is a Tesseract engine capability; Vision has no orientation &
+        // script detection, so refuse it rather than guessing.
+        if (rawConfig["engine"] as? String)?.lowercased() == "vision" {
+            result(FlutterError(
+                code: "UNSUPPORTED_ENGINE",
+                message: "Apple Vision engine does not support OSD. Use OCREngine.tesseract or OCREngine.defaultEngine.",
+                details: nil
+            ))
+            return
+        }
+
+        #if canImport(SwiftyTesseract)
+        let language = (args["language"] as? String) ?? "osd"
+        let tessData = args["tessData"] as? String
+        performTesseractOsd(
+            imagePath: imagePath,
+            language: language,
+            tessData: tessData,
+            result: result
+        )
+        #else
+        result(FlutterError(
+            code: "NOT_SUPPORTED",
+            message: "Orientation & script detection requires Tesseract on this platform.",
+            details: nil
+        ))
+        #endif
     }
 
     private func handleIsSupported(result: @escaping FlutterResult) {
@@ -556,6 +607,141 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
 
             let recognizedText = String(cString: textPtr)
             completeOnce(recognizedText)
+        }
+    }
+
+    private func performTesseractOsd(
+        imagePath: String,
+        language: String,
+        tessData: String?,
+        result: @escaping FlutterResult
+    ) {
+        // Validate image path contains no shell metacharacters.
+        let invalidChars = CharacterSet(charactersIn: ";|&$`\n\r")
+        if imagePath.unicodeScalars.contains(where: { invalidChars.contains($0) }) {
+            result(FlutterError(
+                code: "INVALID_PATH",
+                message: "Image path contains invalid characters",
+                details: nil
+            ))
+            return
+        }
+
+        guard let imageData = try? Data(contentsOf: URL(fileURLWithPath: imagePath)) else {
+            result(FlutterError(
+                code: "IMAGE_LOAD_FAILED",
+                message: "Could not load image at path: \(imagePath)",
+                details: nil
+            ))
+            return
+        }
+
+        guard let validatedTessData = validateTessData(language: language, tessData: tessData) else {
+            result(FlutterError(
+                code: "TESSDATA_NOT_FOUND",
+                message: "Missing or unreadable traineddata for language '\(language)' in the tessdata directory at '\(tessData ?? "tessdata (provided by the app)")'. Orientation & script detection needs a legacy-capable model such as osd.traineddata.",
+                details: nil
+            ))
+            return
+        }
+
+        // The handle is created, used and destroyed ALL inside the dispatched
+        // closure: a `defer` at function scope would end it before the async
+        // block runs (use-after-free), the same rule performTesseractOCR follows.
+        DispatchQueue(label: "com.tesseract.osd", qos: .userInitiated).async {
+            let resultLock = NSLock()
+            var didComplete = false
+            let completeOnce: (Any?) -> Void = { value in
+                resultLock.lock()
+                defer { resultLock.unlock() }
+                guard !didComplete else { return }
+                didComplete = true
+                DispatchQueue.main.async {
+                    result(value)
+                }
+            }
+
+            guard let tessBaseAPI = TessBaseAPICreate() else {
+                completeOnce(FlutterError(
+                    code: "OCR_INIT_FAILED",
+                    message: "Failed to create Tesseract API instance.",
+                    details: nil
+                ))
+                return
+            }
+            defer {
+                TessBaseAPIEnd(tessBaseAPI)
+                TessBaseAPIDelete(tessBaseAPI)
+            }
+
+            let initReturnCode = TessBaseAPIInit2(
+                tessBaseAPI,
+                validatedTessData.directoryPath,
+                language,
+                .default
+            )
+            guard initReturnCode == 0 else {
+                completeOnce(FlutterError(
+                    code: "OCR_INIT_FAILED",
+                    message: "Failed to initialize Tesseract for OSD with language '\(language)' at '\(validatedTessData.directoryPath)' (code: \(initReturnCode)).",
+                    details: nil
+                ))
+                return
+            }
+
+            // `withUnsafeBytes` yields an UnsafeRawBufferPointer; pixReadMem wants
+            // an UnsafePointer<UInt8>, so bind the memory explicitly to UInt8.
+            let pix = imageData.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> OpaquePointer? in
+                guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                    return nil
+                }
+                return pixReadMem(base, imageData.count)
+            }
+            guard let pix = pix else {
+                completeOnce(FlutterError(
+                    code: "OCR_PROCESS_ERROR",
+                    message: "Failed to decode image data for OSD.",
+                    details: nil
+                ))
+                return
+            }
+            defer {
+                pixDestroy(pix)
+            }
+
+            TessBaseAPISetImage2(tessBaseAPI, pix)
+
+            var orientDeg: Int32 = 0
+            var orientConf: Float = 0
+            var scriptConf: Float = 0
+            var scriptName: UnsafePointer<Int8>?
+            let detected = TessBaseAPIDetectOrientationScript(
+                tessBaseAPI,
+                &orientDeg,
+                &orientConf,
+                &scriptName,
+                &scriptConf
+            ) != 0
+
+            let script = scriptName.map { String(cString: $0) } ?? ""
+            if let scriptName = scriptName {
+                TessDeleteText(scriptName)
+            }
+
+            if detected {
+                completeOnce([
+                    "orientation": Int(orientDeg),
+                    "orientation_conf": Double(orientConf),
+                    "script": script,
+                    "script_conf": Double(scriptConf),
+                ])
+            } else {
+                completeOnce(FlutterError(
+                    code: "OSD_FAILED",
+                    message: "Tesseract could not detect orientation & script. Ensure a legacy-capable traineddata (e.g. osd.traineddata) is bundled.",
+                    details: nil
+                ))
+            }
         }
     }
     #endif
