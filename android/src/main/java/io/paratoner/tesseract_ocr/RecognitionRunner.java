@@ -110,6 +110,10 @@ class RecognitionRunner {
      * the bytes, and an engine that could take either would have to guess. A
      * call carrying neither is a caller mistake, answered with
      * {@link #INVALID_ARGUMENT} before the engine is touched.
+     *
+     * <p>A call carrying both is a channel-contract violation rather than a
+     * caller mistake, so it is not rejected here: the path wins, and the
+     * {@code imageBytes} form only exists for callers that have no file.
      */
     void recognize(
         String tessDataPath,
@@ -241,6 +245,10 @@ class RecognitionRunner {
             // contained by the catch below and reported as a recognition
             // error; it never reaches the host process.
             baseApi.applyOptions(options.pageSegMode(), options.variables());
+            // Precedence when a call carries both forms: the path wins, since
+            // the bytes form only exists for callers that have no file. The
+            // Dart layer sends exactly one, so this documents the contract for
+            // a future native caller rather than arbitrating a live case.
             if (image != null) {
                 baseApi.setImage(image);
             } else {

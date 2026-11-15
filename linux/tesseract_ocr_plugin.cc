@@ -5,6 +5,7 @@
 #include <tesseract/capi.h>
 #include <leptonica/allheaders.h>
 
+#include <cerrno>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -82,15 +83,29 @@ std::string resolve_tessdata(const std::string& tess_data_path,
 std::string write_bytes_to_temp_file(const uint8_t* data, size_t length) {
   if (data == nullptr || length == 0) return "";
 
-  char path_template[] = "/tmp/tesseract_ocr_XXXXXX";
-  const int fd = mkstemp(path_template);
+  // Honour $TMPDIR — sandboxed Flutter runtimes (flatpak and friends) set it
+  // to a directory the app is allowed to write — and fall back to /tmp when
+  // it is unset or empty.
+  const char* tmp_dir = getenv("TMPDIR");
+  const char* base_dir =
+      (tmp_dir != nullptr && tmp_dir[0] != '\0') ? tmp_dir : "/tmp";
+  std::string template_string =
+      std::string(base_dir) + "/tesseract_ocr_XXXXXX";
+  std::vector<char> path_template(template_string.begin(),
+                                  template_string.end());
+  path_template.push_back('\0');
+  const int fd = mkstemp(path_template.data());
   if (fd < 0) return "";
 
-  std::string path(path_template);
+  std::string path(path_template.data());
   size_t written = 0;
   while (written < length) {
     const ssize_t chunk =
         write(fd, data + written, length - written);
+    if (chunk < 0 && errno == EINTR) {
+      // A signal landed mid-write: the bytes are not lost, retry.
+      continue;
+    }
     if (chunk <= 0) {
       close(fd);
       unlink(path.c_str());

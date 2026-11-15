@@ -57,33 +57,16 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
     let fileManager = FileManager.default
 
     // The Dart layer sends the encoded image when the caller has bytes. This
-    // plugin drives the `tesseract` executable, which reads a path, so the bytes
-    // are written to a temporary file that is removed again when the run ends.
+    // plugin drives the `tesseract` executable, which reads a path, so the
+    // bytes are materialised to a temporary file — but the write happens
+    // inside the OCR queue below, not here: a multi-megabyte camera frame
+    // must not pay a disk write on the platform thread. The file is removed
+    // again when the run ends.
     let imageBytes = (params["imageBytes"] as? FlutterStandardTypedData)?.data
+    let pendingImageBytes = (imageBytes?.isEmpty == false) ? imageBytes : nil
     let imagePath: String
     let imageLabel: String
-    let temporaryImagePath: String?
-    if let imageBytes = imageBytes, !imageBytes.isEmpty {
-      let temporaryPath = (NSTemporaryDirectory() as NSString)
-        .appendingPathComponent("tesseract_ocr-\(UUID().uuidString).img")
-      do {
-        try imageBytes.write(to: URL(fileURLWithPath: temporaryPath))
-      } catch {
-        result(
-          FlutterError(
-            code: "IMAGE_LOAD_FAILED",
-            message:
-              "Could not write the image bytes to a temporary file: \(error.localizedDescription)",
-            details: nil
-          )
-        )
-        return
-      }
-      imagePath = temporaryPath
-      imageLabel = "in-memory image"
-      temporaryImagePath = temporaryPath
-    } else {
-      temporaryImagePath = nil
+    if pendingImageBytes == nil {
       guard let path = params["imagePath"] as? String, !path.isEmpty else {
         result(
           FlutterError(
@@ -155,6 +138,9 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
 
       imagePath = path
       imageLabel = path
+    } else {
+      imagePath = ""
+      imageLabel = "in-memory image"
     }
 
     let rawLanguage =
@@ -211,8 +197,10 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       return
     }
 
+    // The image path is prepended inside the OCR queue: for the bytes entry
+    // point it is only known once the bytes have been written to their
+    // temporary file, which happens there.
     var arguments: [String] = [
-      imagePath,
       "stdout",
       "--tessdata-dir",
       resolvedTessDataDir,
@@ -241,6 +229,7 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       // A temporary file exists only for the bytes entry point, and the engine
       // has finished reading it by the time this closure ends — on the launch
       // failure path as much as on the normal one.
+      var temporaryImagePath: String?
       defer {
         if let temporaryImagePath = temporaryImagePath {
           try? fileManager.removeItem(atPath: temporaryImagePath)
@@ -262,9 +251,33 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
         }
       }
 
+      // The engine reads a path, so bytes given in memory are materialised to
+      // a temporary file here — on the OCR queue, off the platform thread —
+      // and removed again by the defer above.
+      var runImagePath = imagePath
+      if let pendingImageBytes = pendingImageBytes {
+        let temporaryPath = (NSTemporaryDirectory() as NSString)
+          .appendingPathComponent("tesseract_ocr-\(UUID().uuidString).img")
+        do {
+          try pendingImageBytes.write(to: URL(fileURLWithPath: temporaryPath))
+        } catch {
+          completeOnce(
+            FlutterError(
+              code: "IMAGE_LOAD_FAILED",
+              message:
+                "Could not write the image bytes to a temporary file: \(error.localizedDescription)",
+              details: nil
+            )
+          )
+          return
+        }
+        runImagePath = temporaryPath
+        temporaryImagePath = temporaryPath
+      }
+
       let process = Process()
       process.executableURL = URL(fileURLWithPath: tesseractExecutable)
-      process.arguments = arguments
+      process.arguments = [runImagePath] + arguments
 
       var environment = ProcessInfo.processInfo.environment
       let existingPath = environment["PATH"] ?? "/usr/bin:/bin"
