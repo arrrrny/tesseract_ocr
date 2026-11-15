@@ -182,15 +182,18 @@ This error typically occurs when:
 ### `tessdata-path-invalid` Error
 
 A `tessDataPath` you passed does not name a tessdata directory the engine can
-read: it is missing, it is not a directory, or it does not hold every
+read: it is missing, it is not a directory, it does not hold every
 `.traineddata` the requested `language` needs (`eng.traineddata` for `'eng'`, and
-both `eng.traineddata` and `deu.traineddata` for `'eng+deu'`). The message names
-the directory, the missing file(s), and both layouts it accepts.
+both `eng.traineddata` and `deu.traineddata` for `'eng+deu'`), or a needed
+`.traineddata` is empty (0 bytes — where a truncated download lands). On Android
+the file-holding directory also has to be named `tessdata` (see above). The
+message names the directory, the offending file(s), and both layouts it accepts.
 
 **Solution:** download the missing `.traineddata` file(s) into that directory (the
 [`tessdata_fast`](https://github.com/tesseract-ocr/tessdata_fast) set is the
-smallest), or drop the override to fall back to the bundled `assets/tessdata/`
-set.
+smallest), delete and re-download a 0-byte one, point `tessDataPath` at a
+directory the engine can read, or drop the override to fall back to the bundled
+`assets/tessdata/` set.
 
 ### `tessdata-config-invalid` / `tessdata-asset-invalid` Errors
 

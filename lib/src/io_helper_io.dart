@@ -15,7 +15,9 @@ Future<bool> fileExists(String path) => File(path).exists();
 /// device, and that directory comes in either layout: the `.traineddata` files
 /// sit in it directly, or it is a parent carrying the `tessdata/`
 /// subdirectory the bundled asset copy produces. Both resolve to the directory
-/// the engine reads, so a downloaded set and a bundled set behave identically.
+/// that holds the files, and each platform's bridge points its engine there —
+/// Android's additionally reads `<datapath>/tessdata/` only, so it refuses a
+/// direct-layout directory that is not itself named `tessdata`.
 ///
 /// Anything else throws [PlatformException] naming [path]: the native engine's
 /// own `TESSDATA_NOT_FOUND` sends the caller back to declaring Flutter assets,
@@ -30,18 +32,33 @@ Future<String> resolveTessDataDirectory(
       .map(TessDataAssets.trainedDataFile)
       .toList(growable: false);
 
+  // Wanted files seen with no bytes: a truncated download sits under its own
+  // name, so the actionable answer is "empty", not "missing".
+  final Set<String> emptyFiles = <String>{};
+
   if (trimmed.isNotEmpty) {
     for (final String candidate in <String>[
       trimmed,
       join(trimmed, TessDataAssets.tessdataDirectoryName),
     ]) {
-      final List<String>? present = await _trainedDataFiles(candidate);
+      final Map<String, int>? present = await _trainedDataFiles(candidate);
       if (present == null) continue;
-      final bool complete = wanted.every(present.contains);
-      if (complete) return candidate;
+      final bool complete = wanted.every(present.containsKey);
+      if (!complete) continue;
+      final List<String> empty = wanted
+          .where((String name) => present[name] == 0)
+          .toList(growable: false);
+      if (empty.isEmpty) return candidate;
+      emptyFiles.addAll(empty);
     }
   }
 
+  if (emptyFiles.isNotEmpty) {
+    throw TessDataAssets.emptyFilesException(
+      path: trimmed,
+      files: emptyFiles.toList(growable: false),
+    );
+  }
   throw TessDataAssets.pathException(
     path: trimmed,
     language: language,
@@ -49,28 +66,36 @@ Future<String> resolveTessDataDirectory(
   );
 }
 
-/// The `.traineddata` names in directory [path], or null when [path] is not a
-/// directory this isolate can list.
+/// The `.traineddata` files in directory [path] as `name → byte length`, or
+/// null when [path] is not a directory this isolate can list.
 ///
 /// A null return is "no such directory", never an error to raise: a missing
 /// directory and a directory without the file are the same actionable outcome,
 /// and only one of them is worth a stack trace.
-Future<List<String>?> _trainedDataFiles(String path) async {
+///
+/// Entries are judged by what they point at, not by how they list: a symlink
+/// to a `.traineddata` file (an extracted pack may use symlinks) lists as a
+/// link and stat resolves it to the file it points at, while a directory and a
+/// broken link do not stat as files. The listing itself stays
+/// `followLinks: false` so a broken link is one skipped entry instead of an
+/// error the whole listing dies on.
+Future<Map<String, int>?> _trainedDataFiles(String path) async {
   final Directory directory = Directory(path);
   try {
     final FileStat stats = await directory.stat();
     if (stats.type != FileSystemEntityType.directory) return null;
-    final List<String> names = <String>[];
+    final Map<String, int> files = <String, int>{};
     await for (final FileSystemEntity entity in directory.list(
       followLinks: false,
     )) {
-      if (entity is! File) continue;
+      final FileStat stat = await FileStat.stat(entity.path);
+      if (stat.type != FileSystemEntityType.file) continue;
       final String name = basename(entity.path);
       if (name.endsWith(TessDataAssets.trainedDataExtension)) {
-        names.add(name);
+        files[name] = stat.size;
       }
     }
-    return names;
+    return files;
   } on Object {
     return null;
   }

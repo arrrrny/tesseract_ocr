@@ -78,6 +78,28 @@ class TessDataAssets {
     );
   }
 
+  /// Thrown when a `.traineddata` the request needs is present in [path] but
+  /// carries no bytes.
+  ///
+  /// Distinct from [pathException]: the file is there under its own name, so
+  /// "download the missing files" would be the wrong instruction — a truncated
+  /// download sits exactly here and has to be deleted and fetched again.
+  static PlatformException emptyFilesException({
+    required String path,
+    required List<String> files,
+  }) {
+    return PlatformException(
+      code: invalidPathCode,
+      message: 'Cannot load Tesseract tessdata: "$path" holds an empty '
+          '.traineddata file the requested language needs '
+          '(${files.join(', ')} — 0 bytes).\n'
+          'A truncated download lands exactly here: delete the listed '
+          '.traineddata file(s) and download them again (e.g. from '
+          'github.com/tesseract-ocr/tessdata_fast), or drop the override to '
+          'use the bundled assets/tessdata/ set.',
+    );
+  }
+
   /// Parses the `files` list out of `tessdata_config.json`.
   static List<String> parseFileNames(
     String configJson, {

@@ -153,4 +153,83 @@ void main() {
       ),
     );
   });
+
+  test('a symlinked traineddata file counts as present', () async {
+    // An extracted pack may use symlinks: the file is reachable, so the
+    // resolver must reach it rather than report the pack as missing.
+    final Directory real = await writeTrainedData('pack', <String>[
+      'eng.traineddata',
+    ]);
+    final Directory dir = Directory(p.join(tempDir.path, 'langs'))
+      ..createSync(recursive: true);
+    await Link(
+      p.join(dir.path, 'eng.traineddata'),
+    ).create(p.join(real.path, 'eng.traineddata'));
+
+    expect(
+      await resolveTessDataDirectory(dir.path, language: 'eng'),
+      dir.path,
+    );
+  });
+
+  test('a broken symlink is skipped, not an error the listing dies on',
+      () async {
+    final Directory dir = Directory(p.join(tempDir.path, 'langs'))
+      ..createSync(recursive: true);
+    await Link(
+      p.join(dir.path, 'eng.traineddata'),
+    ).create(p.join(tempDir.path, 'gone.traineddata'));
+
+    await expectLater(
+      () => resolveTessDataDirectory(dir.path, language: 'eng'),
+      throwsA(
+        isA<PlatformException>().having(
+          (PlatformException error) => error.code,
+          'code',
+          'tessdata-path-invalid',
+        ),
+      ),
+    );
+  });
+
+  test('an empty traineddata is refused as empty, not missing', () async {
+    // The asset path rejects a 0-byte asset; the device path owes the same
+    // refusal — a truncated download must not reach the engine to fail there.
+    final Directory dir = Directory(p.join(tempDir.path, 'langs'))
+      ..createSync(recursive: true);
+    File(p.join(dir.path, 'eng.traineddata')).writeAsBytesSync(<int>[]);
+
+    await expectLater(
+      () => resolveTessDataDirectory(dir.path, language: 'eng'),
+      throwsA(
+        isA<PlatformException>()
+            .having(
+              (PlatformException error) => error.code,
+              'code',
+              'tessdata-path-invalid',
+            )
+            .having(
+              (PlatformException error) => error.message,
+              'message',
+              allOf(
+                contains(dir.path),
+                contains('eng.traineddata'),
+                contains('0 bytes'),
+              ),
+            ),
+      ),
+    );
+  });
+
+  test('a good tessdata copy is used when the direct file is empty', () async {
+    final Directory dir = Directory(p.join(tempDir.path, 'langs'))
+      ..createSync(recursive: true);
+    File(p.join(dir.path, 'eng.traineddata')).writeAsBytesSync(<int>[]);
+    await writeTrainedData('langs/tessdata', <String>['eng.traineddata']);
+
+    expect(
+      await resolveTessDataDirectory(dir.path, language: 'eng'),
+      p.join(dir.path, 'tessdata'),
+    );
+  });
 }
