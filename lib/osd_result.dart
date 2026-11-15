@@ -54,20 +54,28 @@ class OsdResult {
 
   static int _asInt(Object? value) {
     if (value is int) return value;
-    if (value is num) return value.toInt();
+    if (value is num) return value.isFinite ? value.toInt() : 0;
     if (value is String) return int.tryParse(value.trim()) ?? 0;
     return 0;
   }
 
   static double _asDouble(Object? value) {
-    if (value is double) return value;
+    if (value is double) return value.isFinite ? value : 0;
     if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value.trim()) ?? 0;
+    if (value is String) {
+      final parsed = double.tryParse(value.trim());
+      return (parsed != null && parsed.isFinite) ? parsed : 0;
+    }
     return 0;
   }
 
-  static String _asString(Object? value) =>
-      value == null ? '' : value.toString();
+  // A non-finite double from a native side must not stringify into the script
+  // name — "NaN"/"Infinity" there would read as a detected script.
+  static String _asString(Object? value) {
+    if (value == null) return '';
+    if (value is double && !value.isFinite) return '';
+    return value.toString();
+  }
 
   @override
   String toString() => 'OsdResult(orientation: $orientationDegrees°, '

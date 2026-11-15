@@ -221,12 +221,21 @@ class TesseractOcrWeb {
       await _verifyBundledTrainedData(language);
     }
 
+    final rawOptions = params['options'];
+    final options =
+        rawOptions is Map ? Map<String, dynamic>.from(rawOptions) : null;
+
     final langPath = TesseractWebHelper.resolveLangPath(
       baseUri: Uri.base,
       overridePath: rawTessData,
     );
 
-    final JSAny imageInput = await _resolveImageInput(rawImagePath);
+    // A path that is neither a bundled asset nor a direct web input fails
+    // loudly here instead of being silently resolved against the page URL:
+    // that fetch would usually return a 404 page, and OSD — whose whole point
+    // is deciding whether to accept an image — would report a baffling decode
+    // failure rather than a bad input.
+    final JSAny imageInput = await _resolveOsdImageInput(rawImagePath);
 
     await _ensureTesseractLoaded();
 
@@ -258,6 +267,18 @@ class TesseractOcrWeb {
         ],
       );
       worker = await workerPromise.toDart;
+
+      // The caller's Tesseract variables reach the OSD worker the same way the
+      // OCR path applies them; the worker is created with the legacy core/lang
+      // regardless, since detection classifies through the legacy templates.
+      final runtimeOptions = TesseractWebHelper.filterRuntimeOptions(options);
+      if (runtimeOptions.isNotEmpty) {
+        final setParamsPromise = worker.callMethodVarArgs<JSPromise<JSAny?>>(
+          'setParameters'.toJS,
+          <JSAny?>[runtimeOptions.jsify()!],
+        );
+        await setParamsPromise.toDart;
+      }
 
       final detectPromise = worker.callMethodVarArgs<JSPromise<JSObject>>(
         'detect'.toJS,
@@ -343,6 +364,34 @@ class TesseractOcrWeb {
       return bytes.toJS;
     } catch (_) {
       return Uri.base.resolve(imagePath).toString().toJS;
+    }
+  }
+
+  /// The OSD variant of [_resolveImageInput]: a path that is neither a direct
+  /// web input nor a bundled asset is rejected instead of being fetched
+  /// relative to the page URL, so a typo'd asset path surfaces as a clear
+  /// argument error rather than as a decode failure over a 404 page. The OCR
+  /// path keeps the historical page-URL fallback for its served-image callers.
+  Future<JSAny> _resolveOsdImageInput(String imagePath) async {
+    if (TesseractWebHelper.isDirectWebImageInput(imagePath)) {
+      return imagePath.toJS;
+    }
+
+    try {
+      final ByteData data = await rootBundle.load(imagePath);
+      final Uint8List bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      return bytes.toJS;
+    } catch (_) {
+      throw PlatformException(
+        code: 'INVALID_IMAGE_INPUT',
+        message:
+            "'$imagePath' is neither a bundled asset nor a direct web input "
+            '(blob:, data:, http://, https://). Bundle the file as a Flutter '
+            'asset or pass an absolute URL.',
+      );
     }
   }
 

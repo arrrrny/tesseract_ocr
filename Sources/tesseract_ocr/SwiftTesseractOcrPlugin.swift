@@ -198,9 +198,14 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         #if canImport(SwiftyTesseract)
         let language = (args["language"] as? String) ?? "osd"
         let tessData = args["tessData"] as? String
+        // The same passthrough the OCR path applies: any Tesseract variable
+        // the caller set reaches the engine instead of being silently dropped.
+        let options = (args["options"] as? [String: Any])
+            ?? (rawConfig["options"] as? [String: Any])
         performTesseractOsd(
             imagePath: imagePath,
             language: language,
+            options: options,
             tessData: tessData,
             result: result
         )
@@ -611,19 +616,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             }
 
             if let options = config?["options"] as? [String: Any] {
-                for (key, value) in options {
-                    let strValue: String
-                    if let s = value as? String {
-                        strValue = s
-                    } else if let b = value as? Bool {
-                        strValue = b ? "1" : "0"
-                    } else if let n = value as? NSNumber {
-                        strValue = n.stringValue
-                    } else {
-                        strValue = "\(value)"
-                    }
-                    TessBaseAPISetVariable(tessBaseAPI, key, strValue)
-                }
+                applyTesseractVariables(options, to: tessBaseAPI)
             }
 
             // Set up timeout
@@ -694,9 +687,33 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         }
     }
 
+    /// Applies the caller's Tesseract variables to the engine handle, coercing
+    /// each value the way `TessBaseAPISetVariable` needs (strings verbatim,
+    /// booleans as 1/0, numbers through NSNumber's string form). Shared by the
+    /// OCR and OSD paths so both honour `OCRConfig.options` the same way.
+    private func applyTesseractVariables(
+        _ options: [String: Any],
+        to tessBaseAPI: OpaquePointer?
+    ) {
+        for (key, value) in options {
+            let strValue: String
+            if let s = value as? String {
+                strValue = s
+            } else if let b = value as? Bool {
+                strValue = b ? "1" : "0"
+            } else if let n = value as? NSNumber {
+                strValue = n.stringValue
+            } else {
+                strValue = "\(value)"
+            }
+            TessBaseAPISetVariable(tessBaseAPI, key, strValue)
+        }
+    }
+
     private func performTesseractOsd(
         imagePath: String,
         language: String,
+        options: [String: Any]?,
         tessData: String?,
         result: @escaping FlutterResult
     ) {
@@ -773,6 +790,23 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 return
             }
 
+            if let options = options {
+                applyTesseractVariables(options, to: tessBaseAPI)
+            }
+
+            // `TessBaseAPIDetectOrientationScript` blocks on this queue with no
+            // watchdog of its own, so the same 30s timeout the OCR path arms
+            // guards here too: a hung decode answers OSD_TIMEOUT instead of
+            // parking the caller's future forever.
+            let timeoutWorkItem = DispatchWorkItem {
+                completeOnce(FlutterError(
+                    code: "OSD_TIMEOUT",
+                    message: "Orientation & script detection timed out after 30 seconds",
+                    details: nil
+                ))
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30.0, execute: timeoutWorkItem)
+
             // `withUnsafeBytes` yields an UnsafeRawBufferPointer; pixReadMem wants
             // an UnsafePointer<UInt8>, so bind the memory explicitly to UInt8.
             let pix = imageData.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> OpaquePointer? in
@@ -782,6 +816,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 return pixReadMem(base, imageData.count)
             }
             guard let pix = pix else {
+                timeoutWorkItem.cancel()
                 completeOnce(FlutterError(
                     code: "OCR_PROCESS_ERROR",
                     message: "Failed to decode image data for OSD.",
@@ -806,6 +841,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 &scriptName,
                 &scriptConf
             ) != 0
+            timeoutWorkItem.cancel()
 
             let script = scriptName.map { String(cString: $0) } ?? ""
             if let scriptName = scriptName {

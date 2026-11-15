@@ -410,7 +410,13 @@ final osd = await TesseractOcr.detectOrientationAndScript(
 print('Rotate by ${osd.orientationDegrees}°, script: ${osd.scriptName}');
 ```
 
-OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`). Android answers `UNSUPPORTED_OSD`: the bundled tesseract4android 4.8.0 binding exposes no OSD result API.
+OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`).
+
+**Language default:** detection classifies with the legacy templates of the `osd` model, so a call that names no language (`config` omitted or no `language` set on the web/Linux/Apple handlers) runs on `osd` — the OCR default `eng` carries no legacy templates and would answer `TESSDATA_NOT_FOUND`. An explicit `OCRConfig(language: ...)` is honoured as given.
+
+**Options:** `OCRConfig.options` travel with the call and are applied by the engines that accept Tesseract variables (iOS, Linux, Web); `tessedit_pageseg_mode` becomes `--psm` on Linux, `setVariable`/`setParameters` elsewhere.
+
+**Platform matrix:** iOS and Linux run the native detector (30s watchdog, `OSD_TIMEOUT` on a hung decode); Web runs tesseract.js `worker.detect()`; **Android answers `UNSUPPORTED_OSD`** (the bundled tesseract4android 4.8.0 binding exposes no OSD result API) and **macOS answers `UNSUPPORTED_OSD`** too (the macOS plugin drives the `tesseract` executable, which cannot return the structured OSD result) — both instead of a `MissingPluginException`.
 
 ### Extracting hOCR (layout-aware output)
 

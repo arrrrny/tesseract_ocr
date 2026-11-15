@@ -404,7 +404,11 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     }
 
     FlMethodCall* retained_call = FL_METHOD_CALL(g_object_ref(method_call));
-    const std::string language = string_arg(args, "language", "eng");
+    // OSD classifies with the legacy templates of the `osd` model, so a
+    // missing language falls back to `osd` — the same default the Apple and
+    // web handlers use. Falling back to the OCR default `eng` would answer
+    // TESSDATA_NOT_FOUND: LSTM-only traineddata carries no legacy templates.
+    const std::string language = string_arg(args, "language", "osd");
     const std::string tess_data = string_arg(args, "tessData", "");
     const auto options = collect_options(args);
 

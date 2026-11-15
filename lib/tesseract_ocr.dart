@@ -175,9 +175,14 @@ class TesseractOcr {
   /// decline an image before running [extractText].
   ///
   /// OSD is a Tesseract engine capability; [OCREngine.vision] has no equivalent
-  /// and is rejected. The engine needs a language model that carries the legacy
-  /// templates the detector classifies with — pass `OCRConfig(language: 'osd')`
-  /// and bundle `osd.traineddata` for script-agnostic detection.
+  /// and is rejected. Detection classifies with the legacy templates carried by
+  /// the `osd` model, so a call that names no language defaults to `osd` —
+  /// bundle `osd.traineddata` for script-agnostic detection. Android and macOS
+  /// answer `UNSUPPORTED_OSD` (see the README's platform matrix).
+  ///
+  /// [OCRConfig.options] travel with the call and are applied by the engines
+  /// that accept Tesseract variables (iOS, Linux, Web); an explicit
+  /// [OCRConfig.language] is honoured as given on every platform.
   static Future<OsdResult> detectOrientationAndScript(
     String imagePath, {
     OCRConfig? config,
@@ -215,11 +220,21 @@ class TesseractOcr {
       );
     }
 
+    // OSD classifies with the legacy templates of the `osd` model, so a call
+    // that names no language runs on `osd` rather than the OCR default `eng`
+    // (whose LSTM-only traineddata carries no legacy templates and would
+    // answer TESSDATA_NOT_FOUND). An explicit language is honoured as given.
+    final String language =
+        (config == null || actualConfig.language.trim().isEmpty)
+            ? 'osd'
+            : actualConfig.language.trim();
+
     final Map<String, dynamic> args = {
       'imagePath': imagePath,
       'tessData': tessDataPath,
-      'language': actualConfig.language,
+      'language': language,
       'engine': actualConfig.engine.toString().split('.').last,
+      if (actualConfig.options != null) 'options': actualConfig.options,
     };
 
     final Map<String, dynamic>? result =

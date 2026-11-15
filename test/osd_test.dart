@@ -94,6 +94,20 @@ void main() {
       expect(result.scriptConfidence, 0);
     });
 
+    test('fromMap maps non-finite numbers to the defaults', () {
+      final result = OsdResult.fromMap(<Object?, Object?>{
+        'orientation': double.nan,
+        'orientation_conf': double.infinity,
+        'script': double.nan,
+        'script_conf': 'Infinity',
+      });
+      expect(result.orientationDegrees, 0);
+      expect(result.orientationConfidence, 0);
+      // A non-finite value must not stringify into the script name.
+      expect(result.scriptName, '');
+      expect(result.scriptConfidence, 0);
+    });
+
     test('toMap round-trips the four OSD fields', () {
       const result = OsdResult(
         orientationDegrees: 90,
@@ -243,6 +257,64 @@ void main() {
       expect(args['tessData'], isNull);
     });
 
+    test('defaults the language to osd when no config is given', () async {
+      final imageFile = File('${tempDir.path}/sample.png');
+      await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+      final fakeTrainedData = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final configBytes = Uint8List.fromList(
+        utf8.encode(
+          jsonEncode(<String, dynamic>{
+            'files': <String>['eng.traineddata', 'osd.traineddata'],
+          }),
+        ),
+      );
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMessageHandler('flutter/assets', (ByteData? message) async {
+        final key = utf8.decode(message!.buffer.asUint8List());
+        if (key == 'assets/tessdata_config.json') {
+          return ByteData.sublistView(configBytes);
+        }
+        if (key == 'assets/tessdata/eng.traineddata' ||
+            key == 'assets/tessdata/osd.traineddata') {
+          return ByteData.sublistView(fakeTrainedData);
+        }
+        return null;
+      });
+
+      await TesseractOcr.detectOrientationAndScript(imageFile.path);
+
+      final args = Map<String, dynamic>.from(
+        recordedCalls.single.arguments as Map,
+      );
+      // The OCR default `eng` is not a legacy-capable detector model, so the
+      // OSD default is the `osd` model itself.
+      expect(args['language'], 'osd');
+    });
+
+    test('forwards OCRConfig.options to the channel', () async {
+      final imageFile = File('${tempDir.path}/sample.png');
+      await imageFile.writeAsBytes(<int>[137, 80, 78, 71]);
+
+      await TesseractOcr.detectOrientationAndScript(
+        imageFile.path,
+        config: const OCRConfig(
+          language: 'osd',
+          tessDataPath: '/unused',
+          options: <String, dynamic>{'tessedit_pageseg_mode': '0'},
+        ),
+      );
+
+      final args = Map<String, dynamic>.from(
+        recordedCalls.single.arguments as Map,
+      );
+      expect(
+        args['options'],
+        <String, dynamic>{'tessedit_pageseg_mode': '0'},
+      );
+    });
+
     test('throws PlatformException when the engine returns no result',
         () async {
       final imageFile = File('${tempDir.path}/sample.png');
@@ -279,6 +351,19 @@ void main() {
       ).readAsString();
       expect(source, contains('"detectOrientationScript"'));
       expect(source, contains('TessBaseAPIDetectOrientationScript'));
+    });
+
+    test('the macOS plugin answers detectOrientationScript explicitly',
+        () async {
+      final source = await File(
+        'macos/tesseract_ocr/Sources/tesseract_ocr/TesseractOcrPlugin.swift',
+      ).readAsString();
+      expect(source, contains('"detectOrientationScript"'));
+      // macOS drives the tesseract executable, which cannot return the
+      // structured OSD result; the handler must answer a clear unsupported
+      // error rather than letting the channel fall through to
+      // FlutterMethodNotImplemented (a MissingPluginException on the caller).
+      expect(source, contains('UNSUPPORTED_OSD'));
     });
 
     test('the web plugin maps tesseract.js detect() to the OSD fields',
