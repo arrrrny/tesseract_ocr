@@ -9,6 +9,7 @@ This plugin utilizes:
 - **Web:** [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1` WebAssembly) using the app's bundled `.traineddata` assets.
 - **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) via Swift Package Manager using the bundled `.traineddata` assets.
 - **Linux:** System [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and Leptonica libraries via C++ CMake plugin.
+- **Windows:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and Leptonica libraries via C++ CMake plugin (vcpkg, MSYS2, or the UB-Mannheim installer).
 
 <!-- ZURAFFA-LAUNCH-PROMO (valid until Dec 1, 2026) -->
 ## 🦒 Zuraffa Browser — Launch Offer
@@ -27,11 +28,12 @@ From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — t
 ## Features
 
 - Perform OCR on images to extract text.
-- Support for multiple OCR engines: Tesseract (Android, iOS, macOS, Linux, and Web), Apple Vision (iOS only).
+- Support for multiple OCR engines: Tesseract (Android, iOS, macOS, Linux, Windows, and Web), Apple Vision (iOS only).
 - Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
 - Supports the latest Dart and Android SDKs.
 - **Swift Package Manager (SPM) support** for iOS and macOS (recommended)
 - **Linux support** via system tesseract library
+- **Windows support** via a C++ plugin that links Tesseract and bundles its DLLs
 
 ## Getting Started
 
@@ -320,6 +322,36 @@ Linux support uses the **system Tesseract library** installed via your distribut
    ```
 
 The plugin uses the system Tesseract library directly via C++ interop, providing native performance without bundled binaries.
+
+## Windows Setup & Prerequisites
+
+Windows support uses the same **Tesseract engine and `tesseract_ocr` method channel** as Linux, implemented as a C++ CMake plugin. `OCREngine.vision` stays iOS-only and is rejected on Windows; every other engine value runs on Tesseract.
+
+### Prerequisites
+
+1. **Flutter Windows Desktop Support**: Enable it with `flutter config --enable-windows-desktop`. You also need Visual Studio 2022 with the "Desktop development with C++" workload, which provides MSVC and CMake 3.14 or later.
+2. **Install Tesseract and Leptonica *with their development files***. The plugin links both libraries and copies their DLLs next to your executable, so a runtime-only install is not enough — it needs `include/tesseract/capi.h` and the import libraries. Any one of these works:
+
+   **vcpkg:**
+   ```powershell
+   vcpkg install tesseract
+   ```
+
+   **MSYS2:**
+   ```bash
+   pacman -S mingw-w64-x86_64-tesseract
+   ```
+
+   **UB-Mannheim installer:** enable "Install development files" so `include/` and `lib/` land in the prefix, then point the configure step at it:
+   ```powershell
+   $env:TESSERACT_ROOT = "C:\Program Files\Tesseract-OCR"
+   flutter build windows
+   ```
+   The plugin also probes the standard prefixes (`%ProgramFiles%\Tesseract-OCR`, the 32-bit one, and the per-user install), so an installer in the default location needs no configuration at all.
+
+3. **Trained data**: `eng` ships with the installer. Other languages are picked up from the Tesseract prefix's `tessdata/`, or from the `assets/tessdata/` set the plugin copies into the app's documents directory like every other platform, or from a path you pass as `OCRConfig(tessDataPath: ...)`. When no path is supplied the plugin also honours `TESSDATA_PREFIX`.
+
+If Tesseract cannot be found, the build stops with the exact packages to install rather than producing a plugin DLL that would fail to load at runtime.
 
 ## Usage
 
