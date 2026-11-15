@@ -130,7 +130,8 @@ Recognition recognize(const std::string& image_path,
                       const std::string& language,
                       const std::string& tess_data_path,
                       const std::vector<std::pair<std::string, std::string>>&
-                          options) {
+                          options,
+                      bool hocr) {
   Recognition out;
 
   TessBaseAPI* api = TessBaseAPICreate();
@@ -176,7 +177,8 @@ Recognition recognize(const std::string& image_path,
     return out;
   }
 
-  char* raw = TessBaseAPIGetUTF8Text(api);
+  char* raw = hocr ? TessBaseAPIGetHOCRText(api, 0)
+                   : TessBaseAPIGetUTF8Text(api);
   if (raw == nullptr) {
     pixDestroy(&pix);
     TessBaseAPIDelete(api);
@@ -250,8 +252,10 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
 
   // The engine is blocking and can run for seconds, so it moves to a worker
   // thread. The reply is marshalled back through the main loop.
-  std::thread([retained_call, image_path, language, tess_data, options]() {
-    Recognition outcome = recognize(image_path, language, tess_data, options);
+  const bool hocr = g_strcmp0(method, "extractHocr") == 0;
+  std::thread([retained_call, image_path, language, tess_data, options, hocr]() {
+    Recognition outcome = recognize(
+        image_path, language, tess_data, options, hocr);
 
     // A failure is reported the same way the other platforms report it: a
     // method-channel error, which the Dart side surfaces as a
