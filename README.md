@@ -151,6 +151,14 @@ This is the flow for large language packs and download-on-demand: nothing is
 written to the app's documents directory, and the first recognition can start as
 soon as the download finishes.
 
+On Android the engine reads its data from `<datapath>/tessdata/<lang>.traineddata`
+only, so the file-holding directory has to be named `tessdata` there: point
+`tessDataPath` at the directory that carries the `tessdata` subdirectory (as in
+the example above), or at a `tessdata` directory holding the files directly. A
+direct layout under any other name is refused with `tessdata-path-invalid`
+instead of an init failure inside the engine. iOS and macOS read the
+file-holding directory itself, so both layouts work as documented.
+
 The directory is validated before the engine is asked to read it. A path that is
 missing, is not a directory, or does not carry every `.traineddata` the requested
 `language` needs raises a `PlatformException` with code `tessdata-path-invalid`
