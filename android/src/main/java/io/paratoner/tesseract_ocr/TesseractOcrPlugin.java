@@ -1,6 +1,8 @@
 package io.paratoner.tesseract_ocr;
 
 import com.googlecode.tesseract.android.TessBaseAPI;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
@@ -58,6 +60,7 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
                 final String tessDataPath = call.argument("tessData");
 
                 final String imagePath = call.argument("imagePath");
+                final byte[] imageBytes = call.argument("imageBytes");
                 String DEFAULT_LANGUAGE = "eng";
 
                 // Check for language parameter first, then check config
@@ -81,10 +84,25 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
                 active.recognize(
                     tessDataPath,
                     imagePath,
+                    imageBytes,
                     DEFAULT_LANGUAGE,
                     call.method.equals("extractHocr"),
                     OcrOptions.from(readOptions(call)),
                     new MethodChannelReply(result)
+                );
+                break;
+            case "detectOrientationScript":
+                // tesseract4android 4.8.0 exposes no OSD result API on
+                // TessBaseAPI (only PageSegMode constants) and its JNI binds no
+                // DetectOS, so orientation & script detection cannot be surfaced
+                // through the bundled binding. Answer a clear unsupported error
+                // rather than silently returning nothing.
+                result.error(
+                    "UNSUPPORTED_OSD",
+                    "Orientation & script detection is not exposed by the "
+                        + "bundled tesseract4android binding (TessBaseAPI has "
+                        + "no OSD result API).",
+                    null
                 );
                 break;
             default:
@@ -194,6 +212,23 @@ public class TesseractOcrPlugin implements MethodCallHandler, FlutterPlugin {
         @Override
         public void setImage(File image) {
             require().setImage(image);
+        }
+
+        @Override
+        public void setImageBytes(byte[] bytes) {
+            // The engine takes a bitmap, so the encoded image is decoded here.
+            // BitmapFactory returns null for bytes it cannot decode — a truncated
+            // download, a format the device cannot read — and that is a failed
+            // recognition, not a crash: the IllegalArgumentException is contained
+            // by RecognitionRunner and reported through the channel.
+            final Bitmap bitmap =
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            if (bitmap == null) {
+                throw new IllegalArgumentException(
+                    "Image bytes could not be decoded as a bitmap."
+                );
+            }
+            require().setImage(bitmap);
         }
 
         @Override

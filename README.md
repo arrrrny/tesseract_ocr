@@ -391,6 +391,28 @@ import 'package:tesseract_ocr/ocr_engine_config.dart';
 
 To perform OCR, use the `TesseractOcr.extractText` method. You can pass an optional `OCRConfig` object to specify the engine and other options.
 
+If the image is already in memory — a camera frame, a picked file's bytes — use
+`TesseractOcr.extractTextFromBytes` instead of writing a temporary file first.
+It takes the same `OCRConfig`:
+
+```dart
+import 'dart:typed_data';
+
+// `bytes` is a complete encoded image: exactly the file content an image path
+// would have pointed at.
+final Uint8List bytes = await pickImageBytes();
+final String text = await TesseractOcr.extractTextFromBytes(
+  bytes,
+  config: const OCRConfig(language: 'eng', engine: OCREngine.tesseract),
+);
+```
+
+Each platform takes the bytes through its own engine entry point — a bitmap on
+Android, a typed array on Web, a data buffer on Apple platforms — so no file is
+written. The two engines driven by the `tesseract` command line (macOS and
+Linux) do write the bytes to a temporary file for the duration of the
+recognition, and delete it again.
+
 ```dart
 Future<void> _performOcr(String imagePath) async {
   try {
@@ -434,6 +456,61 @@ Future<void> _performOcr(String imagePath) async {
   }
 }
 ```
+
+### Orientation & script detection (OSD)
+
+`TesseractOcr.detectOrientationAndScript` mirrors `pytesseract.image_to_osd`: it returns an `OsdResult` carrying the page rotation (`orientationDegrees`, rotate the image by it to make it upright), the detected writing script (`scriptName`), and a confidence for each. Use it to auto-rotate or decline an image before running `extractText`.
+
+```dart
+final osd = await TesseractOcr.detectOrientationAndScript(
+  imagePath,
+  config: const OCRConfig(language: 'osd'), // needs osd.traineddata
+);
+print('Rotate by ${osd.orientationDegrees}°, script: ${osd.scriptName}');
+```
+
+OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the web build runs it through tesseract.js. It needs a legacy-capable traineddata — bundle `osd.traineddata` under `assets/tessdata/` and list it in `tessdata_config.json` (or pass `OCRConfig(tessDataPath: ...)`).
+
+**Language default:** detection classifies with the legacy templates of the `osd` model, so a call that names no language (`config` omitted or no `language` set on the web/Linux/Apple handlers) runs on `osd` — the OCR default `eng` carries no legacy templates and would answer `TESSDATA_NOT_FOUND`. An explicit `OCRConfig(language: ...)` is honoured as given.
+
+**Options:** `OCRConfig.options` travel with the call and are applied by the engines that accept Tesseract variables (iOS, Linux, Web); `tessedit_pageseg_mode` becomes `--psm` on Linux, `setVariable`/`setParameters` elsewhere.
+
+**Platform matrix:** iOS and Linux run the native detector (30s watchdog, `OSD_TIMEOUT` on a hung decode); Web runs tesseract.js `worker.detect()`; **Android answers `UNSUPPORTED_OSD`** (the bundled tesseract4android 4.8.0 binding exposes no OSD result API) and **macOS answers `UNSUPPORTED_OSD`** too (the macOS plugin drives the `tesseract` executable, which cannot return the structured OSD result) — both instead of a `MissingPluginException`.
+
+### Extracting hOCR (layout-aware output)
+
+Alongside plain text, the plugin can return **hOCR** — an HTML-like, layout-aware
+representation of the recognized text where every line, word and symbol carries
+its bounding box. Use it when you need the *structure* of the page (positions,
+word/line grouping) rather than just the characters:
+
+```dart
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+
+Future<void> _performHocr(String imagePath) async {
+  try {
+    final hocr = await TesseractOcr.extractHocr(
+      imagePath,
+      config: const OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+      ),
+    );
+    print('hOCR:\n$hocr');
+  } catch (e) {
+    print('Error performing hOCR: $e');
+  }
+}
+```
+
+- `extractHocr` has the same signature and options as `extractText`; only the
+  returned format differs.
+- It is produced by the **Tesseract** engine, which backs Android, Web, macOS,
+  iOS and Linux.
+- Apple's **Vision** engine (`OCREngine.vision`) has no hOCR output: requesting
+  hOCR with it throws an `UnsupportedError`. Use `OCREngine.tesseract` or
+  `OCREngine.defaultEngine` for hOCR.
 
 ### `OCRConfig`
 

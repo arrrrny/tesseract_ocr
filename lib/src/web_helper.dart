@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:tesseract_ocr/ocr_engine_config.dart';
 
 class TesseractWebOemConfig {
@@ -67,6 +69,26 @@ class TesseractWebHelper {
       result[entry.key] = entry.value.toString();
     }
     return result;
+  }
+
+  /// The encoded image bytes a channel call carries, or null when it carries
+  /// none.
+  ///
+  /// A `Uint8List` survives the standard codec as a byte array, but the
+  /// platform implementations deliver it in whichever typed-data shape their own
+  /// codec produced, so every one of those shapes is read here rather than
+  /// trusted to be the same class.
+  static Uint8List? resolveImageBytes(Object? raw) {
+    if (raw is Uint8List) {
+      return raw;
+    }
+    if (raw is ByteBuffer) {
+      return raw.asUint8List();
+    }
+    if (raw is ByteData) {
+      return raw.buffer.asUint8List(raw.offsetInBytes, raw.lengthInBytes);
+    }
+    return null;
   }
 
   static bool isDirectWebImageInput(String imagePath) {

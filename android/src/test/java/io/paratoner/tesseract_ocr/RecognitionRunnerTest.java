@@ -30,6 +30,7 @@ public class RecognitionRunnerTest {
 
     private static final String TESS_DATA = "/data/data/app/files/tessdata";
     private static final String IMAGE = "/data/data/app/cache/scan.png";
+    private static final byte[] IMAGE_BYTES = {137, 80, 78, 71, 13};
     private static final String LANGUAGE = "eng";
     private static final long TIMEOUT_SECONDS = 5;
 
@@ -81,6 +82,67 @@ public class RecognitionRunnerTest {
         assertEquals(0, api.recycleCount());
         assertEquals(2, reply.errorCount());
         assertEquals("INVALID_ARGUMENT", reply.lastErrorCode());
+    }
+
+    @Test
+    public void imageBytesAreRecognizedWithoutAnImagePath() {
+        api.text = "recognized";
+
+        runner.recognize(
+            TESS_DATA,
+            null,
+            IMAGE_BYTES,
+            LANGUAGE,
+            false,
+            OcrOptions.NONE,
+            reply
+        );
+
+        assertEquals("recognized", reply.awaitSuccess());
+        assertEquals(LANGUAGE, api.initLanguage.get());
+        assertEquals(TESS_DATA, api.initDataPath.get());
+        assertEquals(0, api.imageCount());
+        assertEquals(1, api.imageBytesCount());
+        assertEquals(1, api.recycleCount());
+    }
+
+    @Test
+    public void aCallWithoutAnImageIsRejectedWithoutTouchingTheEngine() {
+        runner.recognize(TESS_DATA, null, null, LANGUAGE, false, OcrOptions.NONE, reply);
+        runner.recognize(
+            TESS_DATA,
+            null,
+            new byte[0],
+            LANGUAGE,
+            false,
+            OcrOptions.NONE,
+            reply
+        );
+
+        assertNull(api.initLanguage.get());
+        assertEquals(0, api.recycleCount());
+        assertEquals(2, reply.errorCount());
+        assertEquals("INVALID_ARGUMENT", reply.lastErrorCode());
+    }
+
+    @Test
+    public void undecodableImageBytesAreReportedAsARecognitionError() {
+        api.setImageFailure =
+            new IllegalArgumentException("Image bytes could not be decoded as a bitmap.");
+
+        runner.recognize(
+            TESS_DATA,
+            null,
+            IMAGE_BYTES,
+            LANGUAGE,
+            false,
+            OcrOptions.NONE,
+            reply
+        );
+
+        assertEquals("RECOGNITION_ERROR", reply.awaitError());
+        assertTrue(reply.lastErrorMessage().contains("could not be decoded"));
+        assertEquals(1, api.recycleCount());
     }
 
     @Test
@@ -355,6 +417,7 @@ public class RecognitionRunnerTest {
         final CountDownLatch readEntered = new CountDownLatch(1);
         final AtomicInteger recycleCount = new AtomicInteger();
         final AtomicInteger imageCount = new AtomicInteger();
+        final AtomicInteger imageBytesCount = new AtomicInteger();
 
         volatile CountDownLatch releaseRead;
         volatile boolean initResult = true;
@@ -403,6 +466,14 @@ public class RecognitionRunnerTest {
         }
 
         @Override
+        public void setImageBytes(byte[] bytes) {
+            imageBytesCount.incrementAndGet();
+            if (setImageFailure != null) {
+                throw setImageFailure;
+            }
+        }
+
+        @Override
         public String getUtf8Text() {
             return read(false);
         }
@@ -425,9 +496,14 @@ public class RecognitionRunnerTest {
             return imageCount.get();
         }
 
+        int imageBytesCount() {
+            return imageBytesCount.get();
+        }
+
         void reset() {
             recycleCount.set(0);
             imageCount.set(0);
+            imageBytesCount.set(0);
             initLanguage.set(null);
             initDataPath.set(null);
             appliedPageSegMode.set(null);
