@@ -398,6 +398,41 @@ Future<void> _performOcr(String imagePath) async {
 }
 ```
 
+### Extracting hOCR (layout-aware output)
+
+Alongside plain text, the plugin can return **hOCR** — an HTML-like, layout-aware
+representation of the recognized text where every line, word and symbol carries
+its bounding box. Use it when you need the *structure* of the page (positions,
+word/line grouping) rather than just the characters:
+
+```dart
+import 'package:tesseract_ocr/tesseract_ocr.dart';
+import 'package:tesseract_ocr/ocr_engine_config.dart';
+
+Future<void> _performHocr(String imagePath) async {
+  try {
+    final hocr = await TesseractOcr.extractHocr(
+      imagePath,
+      config: const OCRConfig(
+        language: 'eng',
+        engine: OCREngine.tesseract,
+      ),
+    );
+    print('hOCR:\n$hocr');
+  } catch (e) {
+    print('Error performing hOCR: $e');
+  }
+}
+```
+
+- `extractHocr` has the same signature and options as `extractText`; only the
+  returned format differs.
+- It is produced by the **Tesseract** engine, which backs Android, Web, macOS,
+  iOS and Linux.
+- Apple's **Vision** engine (`OCREngine.vision`) has no hOCR output: requesting
+  hOCR with it throws an `UnsupportedError`. Use `OCREngine.tesseract` or
+  `OCREngine.defaultEngine` for hOCR.
+
 ### `OCRConfig`
 
 The `OCRConfig` class allows detailed configuration of the OCR process:

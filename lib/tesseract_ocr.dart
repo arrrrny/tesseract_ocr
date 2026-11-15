@@ -25,11 +25,38 @@ class TesseractOcr {
       debugIsMacOSOverride ??
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS);
 
-  /// Recognizes the text in the image at [imagePath].
+  /// Recognizes the text in the image at [imagePath] and returns the plain text.
   ///
   /// The tessdata set is copied from the asset bundle into the app's documents
   /// directory first unless [OCRConfig.tessDataPath] names one.
+  ///
+  /// See [extractHocr] for the layout-aware (bounding-box) output format.
   static Future<String> extractText(
+    String imagePath, {
+    OCRConfig? config,
+  }) {
+    return _extract('extractText', imagePath, config: config);
+  }
+
+  /// Runs OCR on [imagePath] and returns the result as hOCR.
+  ///
+  /// hOCR is an HTML-like, layout-aware representation of the recognized text:
+  /// every line, word and symbol carries its bounding box, so callers doing
+  /// layout-aware extraction (word/line structure, positions) have a supported
+  /// path instead of parsing plain text.
+  ///
+  /// It is produced by the Tesseract engine, which backs Android, Web, macOS,
+  /// iOS and Linux. Apple's Vision engine ([OCREngine.vision]) has no hOCR
+  /// output, so requesting hOCR with it throws [UnsupportedError].
+  static Future<String> extractHocr(
+    String imagePath, {
+    OCRConfig? config,
+  }) {
+    return _extract('extractHocr', imagePath, config: config);
+  }
+
+  static Future<String> _extract(
+    String method,
     String imagePath, {
     OCRConfig? config,
   }) async {
@@ -37,7 +64,7 @@ class TesseractOcr {
       throw ArgumentError.value(imagePath, 'imagePath', 'Must not be empty');
     }
 
-    return _recognize(imagePath: imagePath, config: config);
+    return _recognize(method: method, imagePath: imagePath, config: config);
   }
 
   /// Recognizes the text in an encoded image held in memory.
@@ -63,18 +90,28 @@ class TesseractOcr {
     return _recognize(imageBytes: bytes, config: config);
   }
 
-  /// The one recognition path both entry points share.
+  /// The one recognition path every entry point shares.
   ///
   /// Exactly one of [imagePath] and [imageBytes] is given: the platform engines
   /// disagree about whether an image can be handed over in memory, so the
   /// channel carries whichever form this call has rather than a wrapper the
-  /// natives would each have to unwrap.
+  /// natives would each have to unwrap. [method] is the channel method the
+  /// result format selects (`extractText`, or `extractHocr` for the
+  /// layout-aware output).
   static Future<String> _recognize({
+    String method = 'extractText',
     String? imagePath,
     Uint8List? imageBytes,
     OCRConfig? config,
   }) async {
     final actualConfig = config ?? const OCRConfig();
+
+    if (method == 'extractHocr' && actualConfig.engine == OCREngine.vision) {
+      throw UnsupportedError(
+        'hOCR output is only available with OCREngine.tesseract or '
+        'OCREngine.defaultEngine; OCREngine.vision does not produce hOCR.',
+      );
+    }
 
     if (_isWeb) {
       if (actualConfig.engine == OCREngine.vision) {
@@ -118,10 +155,10 @@ class TesseractOcr {
       if (actualConfig.options != null) 'options': actualConfig.options,
     };
 
-    final String? extractedText = await _channel.invokeMethod<String>(
-      'extractText',
+    final String? extracted = await _channel.invokeMethod<String>(
+      method,
       args,
     );
-    return extractedText ?? '';
+    return extracted ?? '';
   }
 }
