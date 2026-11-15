@@ -117,7 +117,9 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "extractText":
-            handleExtractText(call: call, result: result)
+            handleExtract(call: call, isHocr: false, result: result)
+        case "extractHocr":
+            handleExtract(call: call, isHocr: true, result: result)
         case "isSupported":
             handleIsSupported(result: result)
         default:
@@ -133,7 +135,11 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         #endif
     }
 
-    private func handleExtractText(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    private func handleExtract(
+        call: FlutterMethodCall,
+        isHocr: Bool,
+        result: @escaping FlutterResult
+    ) {
         guard let args = call.arguments as? [String: Any] else {
             result(FlutterError(
                 code: "INVALID_ARGUMENTS",
@@ -165,6 +171,17 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         let engineString = (rawConfig["engine"] as? String)?.lowercased()
         let useVision = (engineString == "vision")
 
+        // hOCR is a Tesseract output format; Apple Vision produces none. Reject
+        // the combination rather than silently returning empty output.
+        if isHocr && useVision {
+            result(FlutterError(
+                code: "UNSUPPORTED_ENGINE",
+                message: "hOCR output requires the Tesseract engine; OCREngine.vision does not produce hOCR.",
+                details: nil
+            ))
+            return
+        }
+
         #if canImport(UIKit) && canImport(SwiftyTesseract) && !os(macOS)
         if useVision {
             performVisionOCR(
@@ -179,6 +196,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
                 language: language,
                 tessData: tessData,
                 config: rawConfig,
+                isHocr: isHocr,
                 result: result
             )
         }
@@ -196,6 +214,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             language: language,
             tessData: tessData,
             config: rawConfig,
+            isHocr: isHocr,
             result: result
         )
         #else
@@ -362,6 +381,7 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
         language: String,
         tessData: String?,
         config: [String: Any]?,
+        isHocr: Bool,
         result: @escaping FlutterResult
     ) {
         // Validate image path contains no shell metacharacters
@@ -542,7 +562,13 @@ public class SwiftTesseractOcrPlugin: NSObject, FlutterPlugin {
             let recognized = TessBaseAPIRecognize(tessBaseAPI, nil) == 0
             timeoutWorkItem.cancel()
 
-            guard recognized, let textPtr = TessBaseAPIGetUTF8Text(tessBaseAPI) else {
+            // hOCR is the layout-aware format (bounding boxes per word/line);
+            // plain UTF-8 text is the default. Both come from libtesseract's C
+            // API and are freed the same way.
+            let textPtr: UnsafeMutablePointer<Int8>? = isHocr
+                ? TessBaseAPIGetHOCRText(tessBaseAPI, 0)
+                : TessBaseAPIGetUTF8Text(tessBaseAPI)
+            guard recognized, let textPtr = textPtr else {
                 completeOnce(FlutterError(
                     code: "OCR_PROCESS_ERROR",
                     message: "Tesseract OCR failed to extract text from image.",

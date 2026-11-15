@@ -25,7 +25,35 @@ class TesseractOcr {
       debugIsMacOSOverride ??
       (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS);
 
+  /// Runs OCR on [imagePath] and returns the recognized plain text.
+  ///
+  /// See [extractHocr] for the layout-aware (bounding-box) output format.
   static Future<String> extractText(
+    String imagePath, {
+    OCRConfig? config,
+  }) {
+    return _extract('extractText', imagePath, config: config);
+  }
+
+  /// Runs OCR on [imagePath] and returns the result as hOCR.
+  ///
+  /// hOCR is an HTML-like, layout-aware representation of the recognized text:
+  /// every line, word and symbol carries its bounding box, so callers doing
+  /// layout-aware extraction (word/line structure, positions) have a supported
+  /// path instead of parsing plain text.
+  ///
+  /// It is produced by the Tesseract engine, which backs Android, Web, macOS,
+  /// iOS and Linux. Apple's Vision engine ([OCREngine.vision]) has no hOCR
+  /// output, so requesting hOCR with it throws [UnsupportedError].
+  static Future<String> extractHocr(
+    String imagePath, {
+    OCRConfig? config,
+  }) {
+    return _extract('extractHocr', imagePath, config: config);
+  }
+
+  static Future<String> _extract(
+    String method,
     String imagePath, {
     OCRConfig? config,
   }) async {
@@ -34,6 +62,13 @@ class TesseractOcr {
     }
 
     final actualConfig = config ?? const OCRConfig();
+
+    if (method == 'extractHocr' && actualConfig.engine == OCREngine.vision) {
+      throw UnsupportedError(
+        'hOCR output is only available with OCREngine.tesseract or '
+        'OCREngine.defaultEngine; OCREngine.vision does not produce hOCR.',
+      );
+    }
 
     if (_isWeb) {
       if (actualConfig.engine == OCREngine.vision) {
@@ -78,10 +113,10 @@ class TesseractOcr {
       if (actualConfig.options != null) 'options': actualConfig.options,
     };
 
-    final String? extractedText = await _channel.invokeMethod<String>(
-      'extractText',
+    final String? extracted = await _channel.invokeMethod<String>(
+      method,
       args,
     );
-    return extractedText ?? '';
+    return extracted ?? '';
   }
 }
