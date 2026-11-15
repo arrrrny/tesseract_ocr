@@ -1,4 +1,11 @@
+// The Flutter engine module is `Flutter` on iOS and `FlutterMacOS` on macOS;
+// importing the wrong one is a hard compile error on the other platform, so the
+// plugin picks by what the SDK actually ships.
+#if canImport(FlutterMacOS)
+import FlutterMacOS
+#else
 import Flutter
+#endif
 import Foundation
 #if canImport(UIKit)
 import UIKit

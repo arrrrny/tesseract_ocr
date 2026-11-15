@@ -76,9 +76,9 @@ class TesseractOcr {
   /// temporary file first is work the plugin can do itself: the bytes travel to
   /// the platform engine as they are, and each engine takes them through its own
   /// native entry point (a bitmap on Android, a typed array on Web, a data
-  /// buffer on Apple platforms). Only the two engines that are driven by a
-  /// command line — macOS and Linux — materialise the bytes into a temporary
-  /// file, which they delete again.
+  /// buffer on Apple platforms). Only the Linux engine, which is driven by a
+  /// command line, materialises the bytes into a temporary file it deletes
+  /// again.
   ///
   /// [bytes] must be a complete encoded image (PNG, JPEG, …), exactly the file
   /// content an image path would have pointed at.
@@ -189,11 +189,12 @@ class TesseractOcr {
   /// OSD is a Tesseract engine capability; [OCREngine.vision] has no equivalent
   /// and is rejected. Detection classifies with the legacy templates carried by
   /// the `osd` model, so a call that names no language defaults to `osd` —
-  /// bundle `osd.traineddata` for script-agnostic detection. Android and macOS
-  /// answer `UNSUPPORTED_OSD` (see the README's platform matrix).
+  /// bundle `osd.traineddata` for script-agnostic detection. Android answers
+  /// `UNSUPPORTED_OSD` (see the README's platform matrix); iOS, macOS, Linux and
+  /// Web run the detector.
   ///
   /// [OCRConfig.options] travel with the call and are applied by the engines
-  /// that accept Tesseract variables (iOS, Linux, Web); an explicit
+  /// that accept Tesseract variables (iOS, macOS, Linux, Web); an explicit
   /// [OCRConfig.language] is honoured as given on every platform.
   static Future<OsdResult> detectOrientationAndScript(
     String imagePath, {

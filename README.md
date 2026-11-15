@@ -7,7 +7,7 @@ This plugin utilizes:
 - **Android:** [Tesseract4Android](https://github.com/adaptech-cz/Tesseract4Android/)
 - **iOS:** [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) (with support for v4.0.1 via custom CocoaPods) and Apple's Vision framework.
 - **Web:** [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6.0.1` WebAssembly) using the app's bundled `.traineddata` assets.
-- **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) via Swift Package Manager using the bundled `.traineddata` assets.
+- **macOS:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) through the same in-process Swift plugin as iOS (SwiftyTesseract + libtesseract) — no `tesseract` binary is installed on the machine.
 - **Linux:** System [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and Leptonica libraries via C++ CMake plugin.
 - **Windows:** [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and Leptonica libraries via C++ CMake plugin (vcpkg, MSYS2, or the UB-Mannheim installer).
 
@@ -31,7 +31,7 @@ From the makers of this plugin: **[Zuraffa Browser](https://zuraffa.com)** — t
 - Support for multiple OCR engines: Tesseract (Android, iOS, macOS, Linux, Windows, and Web), Apple Vision (iOS only).
 - Configurable OCR options (language, engine mode, page segmentation mode, etc.) using `OCRConfig`.
 - Supports the latest Dart and Android SDKs.
-- **Swift Package Manager (SPM) support** for iOS and macOS (recommended)
+- **Swift Package Manager (SPM) support** for iOS and macOS (recommended): the plugin root carries a `Package.swift` that depends on SwiftyTesseract 4.0.1, and the Flutter build for both Apple platforms goes through the plugin's `ios/` and `macos/` podspecs, which compile that same Swift source
 - **Linux support** via system tesseract library
 - **Windows support** via a C++ plugin that links Tesseract and bundles its DLLs
 
@@ -251,18 +251,18 @@ Some users on M1 Macs may see paths like `assets/tessdata/assets/tessdata/file.t
 
 ## iOS Specific Setup (Swift Package Manager - Recommended)
 
-Starting with version 0.5.2+, this plugin uses **Swift Package Manager (SPM)** for iOS, which is the recommended approach going forward.
+Starting with version 0.5.2+, this plugin ships **Swift Package Manager (SPM)** support for iOS, which is the recommended approach going forward.
 
 ### SPM Installation (Recommended)
 
-The plugin automatically integrates with SPM when you add it via `pubspec.yaml`. No additional configuration is required.
+The plugin root carries a `Package.swift` that targets iOS 11.0+ and depends on [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) 4.0.1+, so an app that consumes the plugin through Swift Package Manager adds the plugin root and gets the engine fetched and built for it — no additional configuration is required.
 
 **Requirements:**
 - iOS 11.0 or later
 - Xcode 12.0 or later
 - Flutter 3.19.0 or later
 
-The plugin uses [SwiftyTesseract](https://github.com/SwiftyTesseract/SwiftyTesseract) 4.0.1+ which is automatically fetched and built via SPM.
+A Flutter build (`flutter build ios` / `flutter run`) resolves the plugin through its `ios/tesseract_ocr.podspec`, which compiles the same shared Swift source and therefore still needs `libtesseract.xcframework` next to `ios/libtesseract.podspec` — see the legacy setup below for where the binary goes.
 
 ### Legacy CocoaPods Setup (Deprecated)
 
@@ -324,6 +324,8 @@ For existing projects using CocoaPods, the legacy setup is still available but r
     pod install
     ```
 
+5.  **macOS needs the same two pods**: the macOS plugin (`macos/tesseract_ocr.podspec`) compiles the same shared Swift source and links the same `libtesseract`, so an app that builds for macOS declares `SwiftyTesseract401` (by `:podspec`) and `libtesseract` (by `:path`) in its `macos/Podfile` too — pointing at the plugin's `ios/` directory, which is where the podspecs and the xcframework live. `example/macos/Podfile` is a working reference.
+
 ### Android SDK Support
 
 The plugin is configured to compile against the latest Android SDK (API 35) and has a minimum SDK version of 16, providing broad compatibility.
@@ -338,13 +340,14 @@ Web support uses [Tesseract.js](https://www.npmjs.com/package/tesseract.js) (`v6
 
 ## macOS Setup & Prerequisites
 
-macOS support uses the **Tesseract** engine via **Swift Package Manager (SPM)**. Apple Vision (`OCREngine.vision`) remains iOS-only and is not supported on macOS. Language `.traineddata` files ship in your Flutter app's `assets/tessdata/` directory just like on mobile—no separate per-machine language setup is required for English (`eng`) or other bundled trained data.
+macOS support runs the **same in-process Tesseract engine as iOS** (SwiftyTesseract 4.0.1 on top of libtesseract) through the shared Swift plugin source — the machine does not need a `tesseract` binary installed. Apple Vision (`OCREngine.vision`) remains iOS-only and is not supported on macOS. Language `.traineddata` files ship in your Flutter app's `assets/tessdata/` directory just like on mobile—no separate per-machine language setup is required for English (`eng`) or other bundled trained data.
 
 ### Prerequisites
 
 1. **Flutter macOS Desktop Support**: Ensure Flutter macOS desktop is enabled (`flutter config --enable-macos-desktop`) along with Xcode 12.0 or later.
-2. **SPM Integration**: The plugin automatically integrates with SPM when added via `pubspec.yaml`. No additional configuration is required.
-3. **App Sandbox Configuration**: If your macOS app uses App Sandbox, you must disable it in `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
+2. **Tesseract binary (`libtesseract.xcframework`)**: macOS links the same binary iOS does, and it is not distributed through pub.dev or CocoaPods. Download `libtesseract-0.2.0.xcframework.zip` from the [libtesseract releases page](https://github.com/SwiftyTesseract/libtesseract/releases/tag/0.2.0) and drop the unzipped `libtesseract.xcframework` next to `ios/libtesseract.podspec` in the plugin checkout — see `CUSTOM_PODS_README.md`. The podspec raises a named error when it is missing, instead of failing later at link time.
+3. **SPM for direct consumers**: an app that consumes the plugin through Swift Package Manager (rather than `flutter pub add`) adds the plugin root, whose `Package.swift` targets iOS 11+ and macOS 10.13+ and pulls SwiftyTesseract itself.
+4. **App Sandbox Configuration**: If your macOS app uses App Sandbox, you must disable it in `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
    ```xml
    <key>com.apple.security.app-sandbox</key>
    <false/>
@@ -441,9 +444,9 @@ final String text = await TesseractOcr.extractTextFromBytes(
 
 Each platform takes the bytes through its own engine entry point — a bitmap on
 Android, a typed array on Web, a data buffer on Apple platforms — so no file is
-written. The two engines driven by the `tesseract` command line (macOS and
-Linux) do write the bytes to a temporary file for the duration of the
-recognition, and delete it again.
+written. The Linux engine, which drives the `tesseract` command line, does write
+the bytes to a temporary file for the duration of the recognition, and deletes it
+again.
 
 ```dart
 Future<void> _performOcr(String imagePath) async {
@@ -507,7 +510,7 @@ OSD is a Tesseract engine capability: `OCREngine.vision` is rejected, and the we
 
 **Options:** `OCRConfig.options` travel with the call and are applied by the engines that accept Tesseract variables (iOS, Linux, Web); `tessedit_pageseg_mode` becomes `--psm` on Linux, `setVariable`/`setParameters` elsewhere.
 
-**Platform matrix:** iOS and Linux run the native detector (30s watchdog, `OSD_TIMEOUT` on a hung decode); Web runs tesseract.js `worker.detect()`; **Android answers `UNSUPPORTED_OSD`** (the bundled tesseract4android 4.8.0 binding exposes no OSD result API) and **macOS answers `UNSUPPORTED_OSD`** too (the macOS plugin drives the `tesseract` executable, which cannot return the structured OSD result) — both instead of a `MissingPluginException`.
+**Platform matrix:** iOS, macOS and Linux run the native detector (30s watchdog, `OSD_TIMEOUT` on a hung decode); Web runs tesseract.js `worker.detect()`; **Android answers `UNSUPPORTED_OSD`** (the bundled tesseract4android 4.8.0 binding exposes no OSD result API) — instead of a `MissingPluginException`. macOS gained the detector when it moved onto the shared Swift plugin; before that it drove the `tesseract` executable, which cannot return a structured result.
 
 ### Extracting hOCR (layout-aware output)
 

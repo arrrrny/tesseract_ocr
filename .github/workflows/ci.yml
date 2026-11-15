@@ -63,7 +63,7 @@ jobs:
           # The iOS podspec must compile the shared Sources/ copy (the old
           # byte-identical ios/Classes duplicate is gone) and declare the pods
           # that provide Flutter and SwiftyTesseract.
-          grep -q "s.source_files = 'Sources/tesseract_ocr/\\*.swift'" ios/tesseract_ocr.podspec
+          grep -q "s.source_files = '../Sources/tesseract_ocr/\\*.swift'" ios/tesseract_ocr.podspec
           grep -q "s.dependency 'Flutter'" ios/tesseract_ocr.podspec
           grep -q "s.dependency 'SwiftyTesseract401'" ios/tesseract_ocr.podspec
           # Every Swift file the podspec names must exist.

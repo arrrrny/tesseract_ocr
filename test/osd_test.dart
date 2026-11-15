@@ -353,17 +353,21 @@ void main() {
       expect(source, contains('TessBaseAPIDetectOrientationScript'));
     });
 
-    test('the macOS plugin answers detectOrientationScript explicitly',
+    test('the macOS plugin answers detectOrientationScript through the shared C API',
         () async {
+      // macOS runs the shared Swift plugin (it stopped driving the tesseract
+      // executable), so it answers the channel method with the native detector
+      // instead of an explicit UNSUPPORTED_OSD.
       final source = await File(
-        'macos/tesseract_ocr/Sources/tesseract_ocr/TesseractOcrPlugin.swift',
+        'Sources/tesseract_ocr/SwiftTesseractOcrPlugin.swift',
       ).readAsString();
       expect(source, contains('"detectOrientationScript"'));
-      // macOS drives the tesseract executable, which cannot return the
-      // structured OSD result; the handler must answer a clear unsupported
-      // error rather than letting the channel fall through to
-      // FlutterMethodNotImplemented (a MissingPluginException on the caller).
-      expect(source, contains('UNSUPPORTED_OSD'));
+      expect(source, contains('TessBaseAPIDetectOrientationScript'));
+      expect(
+        source,
+        isNot(contains('UNSUPPORTED_OSD')),
+        reason: 'macOS no longer answers OSD as unsupported',
+      );
     });
 
     test('the web plugin maps tesseract.js detect() to the OSD fields',

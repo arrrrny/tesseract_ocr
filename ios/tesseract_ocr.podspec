@@ -13,10 +13,11 @@ Tesseract 4 adds a new neural net (LSTM) based OCR engine which is focused on li
   s.author           = { 'Ahmet TOK' => 'arny@paratoner.io' }
   s.source           = { :path => '.' }
   # Compile the shared SwiftPM sources (the single source of truth, also built by
-  # Package.swift and shared into the Flutter iOS/macOS builds via
-  # sharedDarwinSource). The old Classes/SwiftTesseractOcrPlugin.swift was a
-  # byte-identical copy that drifted and shipped compile errors twice; it is gone.
-  s.source_files = 'Sources/tesseract_ocr/*.swift', 'Classes/*.{h,m,mm}'
+  # Package.swift). CocoaPods resolves these patterns against the podspec's own
+  # directory (ios/), so the shared tree is reached as ../Sources. The old
+  # Classes/SwiftTesseractOcrPlugin.swift was a byte-identical copy that drifted
+  # and shipped compile errors twice; it is gone.
+  s.source_files = '../Sources/tesseract_ocr/*.swift', 'Classes/*.{h,m,mm}'
   s.public_header_files = 'Classes/**/*.h'
   s.dependency 'Flutter'
   s.dependency 'SwiftyTesseract401' # Use 4.0.1 from GitHub via custom podspec

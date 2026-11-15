@@ -189,12 +189,15 @@ void main() {
       }
 
       // Swift/ObjC modules the platform itself provides are not pods, so they
-      // are outside what a podspec could ever provide.
+      // are outside what a podspec could ever provide. `FlutterMacOS` is the
+      // macOS engine module (the shared Swift source picks between it and
+      // `Flutter` by canImport).
       final Set<String> systemModules = <String>{
         'UIKit',
         'AppKit',
         'Foundation',
         'Flutter',
+        'FlutterMacOS',
         'Vision',
       };
       final Set<String> missing =

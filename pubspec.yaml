@@ -32,9 +32,15 @@ flutter:
         pluginClass: TesseractOcrPlugin
       ios:
         pluginClass: TesseractOcrPlugin
+      # No `sharedDarwinSource: true` here on purpose: that flag makes Flutter
+      # resolve the podspec and the Swift package manifest from a `darwin/`
+      # directory (`<plugin>/darwin/tesseract_ocr.podspec`), which this plugin
+      # does not ship — `pod install` then fails with "No podspec found for
+      # tesseract_ocr" before any pod is considered. iOS and macOS keep their own
+      # platform directories (ios/, macos/) and share the Swift source through
+      # the podspecs instead.
       macos:
         pluginClass: TesseractOcrPlugin
-        sharedDarwinSource: true
       web:
         pluginClass: TesseractOcrWeb
         fileName: tesseract_ocr_web.dart

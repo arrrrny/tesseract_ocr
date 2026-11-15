@@ -88,16 +88,27 @@ void main() {
     );
   });
 
-  test('pubspec.yaml declares sharedDarwinSource for the shared Apple source',
+  test('pubspec.yaml does not claim a shared-Darwin source without a darwin/ dir',
       () async {
+    // Flutter resolves a `sharedDarwinSource: true` platform to
+    // `<plugin>/darwin/<name>.podspec` and `<plugin>/darwin/<name>/Package.swift`
+    // (flutter_tools plugins.dart `_darwinPluginDirectoryName`, and
+    // bin/podhelper.rb `platform_directory = shared_darwin_source ? 'darwin' : platform`).
+    // This plugin ships ios/ and macos/, so the flag pointed macOS at a directory
+    // that does not exist and `pod install` failed with "No podspec found for
+    // tesseract_ocr" before any pod was considered.
     final pubspec = await File('pubspec.yaml').readAsString();
+    final macos = RegExp(
+      r'macos:\s*\n\s*pluginClass:\s*TesseractOcrPlugin',
+    ).firstMatch(pubspec);
+    expect(macos, isNotNull, reason: 'pubspec.yaml must register macOS');
+
+    final block = pubspec.substring(macos!.start);
     expect(
-      pubspec,
-      matches(
-        RegExp(
-          r'macos:\s*\n\s*pluginClass:\s*TesseractOcrPlugin\s*\n\s*sharedDarwinSource:\s*true',
-        ),
-      ),
+      block,
+      isNot(contains('sharedDarwinSource: true')),
+      reason: 'macOS must resolve to macos/tesseract_ocr.podspec, not a '
+          'darwin/ directory this plugin does not ship',
     );
   });
 
