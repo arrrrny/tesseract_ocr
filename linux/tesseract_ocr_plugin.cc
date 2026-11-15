@@ -11,6 +11,10 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 namespace {
 
 constexpr char kChannelName[] = "tesseract_ocr";
@@ -66,6 +70,37 @@ std::string resolve_tessdata(const std::string& tess_data_path,
     if (dir_has_language(candidate, language)) return candidate;
   }
   return "";
+}
+
+// Writes the image bytes a call carried to a unique temporary file and returns
+// its path, or "" when the write failed.
+//
+// Leptonica's `pixReadMem` is the natural entry point for bytes, but its
+// signature has changed across the versions a distro may ship, and the plugin
+// is built against the system's leptonica rather than a pinned one. A file
+// keeps the decode path on the one signature this plugin already compiles.
+std::string write_bytes_to_temp_file(const uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0) return "";
+
+  char path_template[] = "/tmp/tesseract_ocr_XXXXXX";
+  const int fd = mkstemp(path_template);
+  if (fd < 0) return "";
+
+  std::string path(path_template);
+  size_t written = 0;
+  while (written < length) {
+    const ssize_t chunk =
+        write(fd, data + written, length - written);
+    if (chunk <= 0) {
+      close(fd);
+      unlink(path.c_str());
+      return "";
+    }
+    written += static_cast<size_t>(chunk);
+  }
+
+  close(fd);
+  return path;
 }
 
 std::string string_arg(FlValue* args, const char* key,
@@ -216,7 +251,17 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
   }
 
   const std::string image_path = string_arg(args, "imagePath", "");
-  if (image_path.empty()) {
+
+  // A call carries either a path or the encoded image. Bytes never become a
+  // path in the reply: they are written to a temporary file on the worker
+  // thread, so the argument this handler answers for stays the caller's own.
+  FlValue* raw_image_bytes = fl_value_lookup_string(args, "imageBytes");
+  const bool has_image_bytes =
+      raw_image_bytes != nullptr &&
+      fl_value_get_type(raw_image_bytes) == FL_VALUE_TYPE_UINT8_LIST &&
+      fl_value_get_length(raw_image_bytes) > 0;
+
+  if (!has_image_bytes && image_path.empty()) {
     fl_method_call_respond_error(method_call, "MISSING_PARAMS",
                                  "Required parameter 'imagePath' is missing.",
                                  nullptr, nullptr);
@@ -231,11 +276,17 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     return;
   }
 
-  if (!path_is_safe(image_path)) {
+  if (!has_image_bytes && !path_is_safe(image_path)) {
     fl_method_call_respond_error(method_call, "INVALID_PATH",
                                  "Image path contains invalid characters.",
                                  nullptr, nullptr);
     return;
+  }
+
+  std::vector<uint8_t> image_bytes;
+  if (has_image_bytes) {
+    const uint8_t* raw = fl_value_get_uint8_list(raw_image_bytes);
+    image_bytes.assign(raw, raw + fl_value_get_length(raw_image_bytes));
   }
 
   // Take a reference on `method_call` synchronously, before the worker thread
@@ -250,8 +301,26 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
 
   // The engine is blocking and can run for seconds, so it moves to a worker
   // thread. The reply is marshalled back through the main loop.
-  std::thread([retained_call, image_path, language, tess_data, options]() {
-    Recognition outcome = recognize(image_path, language, tess_data, options);
+  std::thread([retained_call, image_path, language, tess_data, options,
+               image_bytes]() {
+    Recognition outcome;
+    if (image_bytes.empty()) {
+      outcome = recognize(image_path, language, tess_data, options);
+    } else {
+      // The engine reads the image from disk, so the bytes are written to a
+      // unique temporary file for the duration of this recognition and removed
+      // again — the plugin never leaves an image behind.
+      const std::string temporary =
+          write_bytes_to_temp_file(image_bytes.data(), image_bytes.size());
+      if (temporary.empty()) {
+        outcome.error_code = "IMAGE_LOAD_FAILED";
+        outcome.error_message =
+            "Could not write the image bytes to a temporary file.";
+      } else {
+        outcome = recognize(temporary, language, tess_data, options);
+        unlink(temporary.c_str());
+      }
+    }
 
     // A failure is reported the same way the other platforms report it: a
     // method-channel error, which the Dart side surfaces as a

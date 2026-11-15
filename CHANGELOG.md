@@ -1,5 +1,6 @@
 ## 0.6.1
 
+*   **`TesseractOcr.extractTextFromBytes` accepts an image in memory (issue #55):** a camera-first caller can hand over the encoded bytes instead of writing a temporary file first — the bytes go to the platform engine as they arrive (a bitmap on Android, a `Uint8Array` on Web, a data buffer on Apple platforms), and only the command-line engines (macOS, Linux) materialise them into a temporary file they delete again
 *   **`OCRConfig.options` is honoured on Android again (issue #59):** `tessedit_pageseg_mode` now reaches `TessBaseAPI.setPageSegMode` instead of every recognition running with `PSM_AUTO`, and every other option is applied with `setVariable` — previously the Android plugin never read `options` at all
 *   **iOS Vision honours a documented subset of options:** `recognition_level` (`fast`/`accurate`) and `uses_language_correction` are applied to the Vision request; any other key is logged as ignored rather than silently dropped
 *   **macOS and Linux no longer emit the PSM and OEM twice:** both are excluded from the generic `-c key=value` passthrough, and the Linux plugin now applies the PSM and the Tesseract variables at all

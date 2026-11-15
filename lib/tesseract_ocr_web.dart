@@ -66,8 +66,11 @@ class TesseractOcrWeb {
       );
     }
 
+    final Uint8List? imageBytes =
+        TesseractWebHelper.resolveImageBytes(params['imageBytes']);
+
     final rawImagePath = params['imagePath']?.toString().trim() ?? '';
-    if (rawImagePath.isEmpty) {
+    if (imageBytes == null && rawImagePath.isEmpty) {
       throw PlatformException(
         code: 'MISSING_PARAMS',
         message: "Required parameter 'imagePath' is missing.",
@@ -94,7 +97,11 @@ class TesseractOcrWeb {
     final gzip = TesseractWebHelper.resolveGzip(options);
     final runtimeOptions = TesseractWebHelper.filterRuntimeOptions(options);
 
-    final JSAny imageInput = await _resolveImageInput(rawImagePath);
+    // tesseract.js recognizes a Uint8Array directly, so the bytes travel as
+    // they arrived — no asset read, no temporary file, no URL to resolve.
+    final JSAny imageInput = imageBytes != null
+        ? imageBytes.toJS
+        : await _resolveImageInput(rawImagePath);
 
     await _ensureTesseractLoaded();
 

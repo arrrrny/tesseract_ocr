@@ -54,74 +54,107 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    guard let imagePath = params["imagePath"] as? String, !imagePath.isEmpty else {
-      result(
-        FlutterError(
-          code: "MISSING_PARAMS",
-          message: "Required parameter 'imagePath' is missing.",
-          details: nil
-        )
-      )
-      return
-    }
-
-    guard !imagePath.contains(where: { ";|&$`\n\r".contains($0) }) else {
-      result(
-        FlutterError(
-          code: "INVALID_PATH",
-          message: "Image path contains invalid characters",
-          details: nil
-        )
-      )
-      return
-    }
-
     let fileManager = FileManager.default
-    var isDirectory: ObjCBool = false
-    guard fileManager.fileExists(atPath: imagePath, isDirectory: &isDirectory) else {
-      result(
-        FlutterError(
-          code: "IMAGE_NOT_FOUND",
-          message: "Image file does not exist at path: \(imagePath)",
-          details: nil
-        )
-      )
-      return
-    }
 
-    if isDirectory.boolValue {
-      result(
-        FlutterError(
-          code: "IMAGE_LOAD_FAILED",
-          message: "Expected an image file but found a directory at path: \(imagePath)",
-          details: nil
+    // The Dart layer sends the encoded image when the caller has bytes. This
+    // plugin drives the `tesseract` executable, which reads a path, so the bytes
+    // are written to a temporary file that is removed again when the run ends.
+    let imageBytes = (params["imageBytes"] as? FlutterStandardTypedData)?.data
+    let imagePath: String
+    let imageLabel: String
+    let temporaryImagePath: String?
+    if let imageBytes = imageBytes, !imageBytes.isEmpty {
+      let temporaryPath = (NSTemporaryDirectory() as NSString)
+        .appendingPathComponent("tesseract_ocr-\(UUID().uuidString).img")
+      do {
+        try imageBytes.write(to: URL(fileURLWithPath: temporaryPath))
+      } catch {
+        result(
+          FlutterError(
+            code: "IMAGE_LOAD_FAILED",
+            message:
+              "Could not write the image bytes to a temporary file: \(error.localizedDescription)",
+            details: nil
+          )
         )
-      )
-      return
-    }
+        return
+      }
+      imagePath = temporaryPath
+      imageLabel = "in-memory image"
+      temporaryImagePath = temporaryPath
+    } else {
+      temporaryImagePath = nil
+      guard let path = params["imagePath"] as? String, !path.isEmpty else {
+        result(
+          FlutterError(
+            code: "MISSING_PARAMS",
+            message: "Required parameter 'imagePath' is missing.",
+            details: nil
+          )
+        )
+        return
+      }
 
-    guard fileManager.isReadableFile(atPath: imagePath) else {
-      result(
-        FlutterError(
-          code: "IMAGE_UNREADABLE",
-          message: "Image file is not readable at path: \(imagePath)",
-          details: nil
+      guard !path.contains(where: { ";|&$`\n\r".contains($0) }) else {
+        result(
+          FlutterError(
+            code: "INVALID_PATH",
+            message: "Image path contains invalid characters",
+            details: nil
+          )
         )
-      )
-      return
-    }
+        return
+      }
 
-    if let attributes = try? fileManager.attributesOfItem(atPath: imagePath),
-       let fileSize = attributes[.size] as? NSNumber,
-       fileSize.int64Value == 0 {
-      result(
-        FlutterError(
-          code: "IMAGE_LOAD_FAILED",
-          message: "Image file is empty at path: \(imagePath)",
-          details: nil
+      var isDirectory: ObjCBool = false
+      guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+        result(
+          FlutterError(
+            code: "IMAGE_NOT_FOUND",
+            message: "Image file does not exist at path: \(path)",
+            details: nil
+          )
         )
-      )
-      return
+        return
+      }
+
+      if isDirectory.boolValue {
+        result(
+          FlutterError(
+            code: "IMAGE_LOAD_FAILED",
+            message: "Expected an image file but found a directory at path: \(path)",
+            details: nil
+          )
+        )
+        return
+      }
+
+      guard fileManager.isReadableFile(atPath: path) else {
+        result(
+          FlutterError(
+            code: "IMAGE_UNREADABLE",
+            message: "Image file is not readable at path: \(path)",
+            details: nil
+          )
+        )
+        return
+      }
+
+      if let attributes = try? fileManager.attributesOfItem(atPath: path),
+         let fileSize = attributes[.size] as? NSNumber,
+         fileSize.int64Value == 0 {
+        result(
+          FlutterError(
+            code: "IMAGE_LOAD_FAILED",
+            message: "Image file is empty at path: \(path)",
+            details: nil
+          )
+        )
+        return
+      }
+
+      imagePath = path
+      imageLabel = path
     }
 
     let rawLanguage =
@@ -205,6 +238,15 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
     }
 
     ocrQueue.async {
+      // A temporary file exists only for the bytes entry point, and the engine
+      // has finished reading it by the time this closure ends — on the launch
+      // failure path as much as on the normal one.
+      defer {
+        if let temporaryImagePath = temporaryImagePath {
+          try? fileManager.removeItem(atPath: temporaryImagePath)
+        }
+      }
+
       // The timeout and the OCR completion can race: without this guard
       // `result` would be called twice (once by whichever finishes first,
       // once by the other) and a second FlutterResult call crashes the app.
@@ -294,7 +336,7 @@ public class TesseractOcrPlugin: NSObject, FlutterPlugin {
         completeOnce(cleaned)
       } else {
         let message = stderrText.isEmpty
-          ? "Tesseract failed with exit status \(process.terminationStatus) for image '\(imagePath)'."
+          ? "Tesseract failed with exit status \(process.terminationStatus) for image '\(imageLabel)'."
           : "Tesseract failed (exit status \(process.terminationStatus)): \(stderrText)"
         completeOnce(
           FlutterError(
