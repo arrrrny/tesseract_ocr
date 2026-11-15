@@ -39,6 +39,17 @@ interface NativeOcrApi {
     /** Selects the image to recognize. */
     void setImage(File image);
 
+    /**
+     * Selects the image to recognize from its encoded bytes.
+     *
+     * <p>The engine takes a bitmap, so decoding the encoded image is this call's
+     * job: a caller that has the bytes must not have to write a temporary file
+     * to get them recognized.
+     *
+     * @throws IllegalArgumentException when the bytes are not a decodable image
+     */
+    void setImageBytes(byte[] bytes);
+
     /** Recognized text as UTF-8. */
     String getUtf8Text();
 

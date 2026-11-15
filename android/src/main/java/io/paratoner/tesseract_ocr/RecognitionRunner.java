@@ -91,6 +91,39 @@ class RecognitionRunner {
         OcrOptions options,
         Reply reply
     ) {
+        recognize(
+            tessDataPath,
+            imagePath,
+            null,
+            language,
+            hocr,
+            options,
+            reply
+        );
+    }
+
+    /**
+     * Recognizes either the image at {@code imagePath} or the encoded image in
+     * {@code imageBytes}.
+     *
+     * <p>Exactly one of the two is given: the caller either has a file or has
+     * the bytes, and an engine that could take either would have to guess. A
+     * call carrying neither is a caller mistake, answered with
+     * {@link #INVALID_ARGUMENT} before the engine is touched.
+     *
+     * <p>A call carrying both is a channel-contract violation rather than a
+     * caller mistake, so it is not rejected here: the path wins, and the
+     * {@code imageBytes} form only exists for callers that have no file.
+     */
+    void recognize(
+        String tessDataPath,
+        String imagePath,
+        byte[] imageBytes,
+        String language,
+        boolean hocr,
+        OcrOptions options,
+        Reply reply
+    ) {
         if (!attached.get()) {
             reply.error(
                 DETACHED,
@@ -109,17 +142,19 @@ class RecognitionRunner {
             return;
         }
 
-        if (imagePath == null) {
+        final boolean hasBytes = imageBytes != null && imageBytes.length > 0;
+        if (imagePath == null && !hasBytes) {
             reply.error(
                 INVALID_ARGUMENT,
-                "Image path must not be null!",
+                "Either an image path or image bytes must be provided.",
                 null
             );
             return;
         }
 
         final String languageOrDefault = language == null ? "eng" : language;
-        final File image = new File(imagePath);
+        final File image = imagePath == null ? null : new File(imagePath);
+        final byte[] bytes = hasBytes ? imageBytes : null;
         final OcrOptions resolvedOptions = options == null ? OcrOptions.NONE : options;
 
         try {
@@ -128,6 +163,7 @@ class RecognitionRunner {
                     recognizeOnWorkerThread(
                         tessDataPath,
                         image,
+                        bytes,
                         languageOrDefault,
                         hocr,
                         resolvedOptions,
@@ -157,6 +193,7 @@ class RecognitionRunner {
     private void recognizeOnWorkerThread(
         String tessDataPath,
         File image,
+        byte[] imageBytes,
         String language,
         boolean hocr,
         OcrOptions options,
@@ -208,7 +245,15 @@ class RecognitionRunner {
             // contained by the catch below and reported as a recognition
             // error; it never reaches the host process.
             baseApi.applyOptions(options.pageSegMode(), options.variables());
-            baseApi.setImage(image);
+            // Precedence when a call carries both forms: the path wins, since
+            // the bytes form only exists for callers that have no file. The
+            // Dart layer sends exactly one, so this documents the contract for
+            // a future native caller rather than arbitrating a live case.
+            if (image != null) {
+                baseApi.setImage(image);
+            } else {
+                baseApi.setImageBytes(imageBytes);
+            }
             final String recognizedText = hocr
                 ? baseApi.getHocrText()
                 : baseApi.getUtf8Text();
